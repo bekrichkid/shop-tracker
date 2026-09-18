@@ -39,6 +39,7 @@ export const api = {
 
   getCategories: () => request("/categories"),
   addCategory: (data) => request("/categories", { method: "POST", body: JSON.stringify(data) }),
+  deleteCategory: (id) => request(`/categories/${id}`, { method: "DELETE" }),
 
   getBudgets: () => request("/budgets"),
   setBudget: (categoryId, limit) => request(`/budgets/${categoryId}`, { method: "PUT", body: JSON.stringify({ limit }) }),

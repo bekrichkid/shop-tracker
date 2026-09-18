@@ -9,6 +9,7 @@ import TransactionList from "./components/TransactionList.jsx";
 import ChartsPanel from "./components/ChartsPanel.jsx";
 import ProductGrid from "./components/ProductGrid.jsx";
 import InventoryList from "./components/InventoryList.jsx";
+import CategoryManager from "./components/CategoryManager.jsx";
 
 const emptyFilters = { type: "", category: "", from: "", to: "", q: "" };
 const TABS = [
@@ -29,6 +30,7 @@ export default function App() {
   const [synced, setSynced] = useState(true);
   const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "light");
   const [toast, setToast] = useState(null);
+  const [showManager, setShowManager] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -120,6 +122,22 @@ export default function App() {
     await syncAll();
   }
 
+  async function handleAddCategory(data) {
+    const cat = await api.addCategory(data);
+    await syncAll();
+    return cat;
+  }
+
+  async function handleDeleteCategory(id) {
+    await api.deleteCategory(id);
+    await syncAll();
+  }
+
+  async function handleSetBudget(categoryId, limit) {
+    await api.setBudget(categoryId, limit);
+    await syncAll();
+  }
+
   async function handleBuy(data) {
     await api.buyProduct(data);
     await syncAll();
@@ -147,6 +165,7 @@ export default function App() {
       <header className="app-header">
         <h1>Tovar Do'koni</h1>
         <div className="header-actions">
+          <button className="link-btn" onClick={() => setShowManager(true)}>Kategoriyalar</button>
           <button className="theme-toggle" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
             {theme === "light" ? "🌙" : "☀️"}
           </button>
@@ -190,6 +209,18 @@ export default function App() {
 
       {tab === "inventory" && (
         <InventoryList items={inventory} onSell={handleSell} onDelete={handleDeleteInventory} />
+      )}
+
+      {showManager && (
+        <CategoryManager
+          categories={categories}
+          budgets={budgets}
+          monthTransactions={monthTransactions}
+          onSetBudget={handleSetBudget}
+          onDeleteCategory={handleDeleteCategory}
+          onAddCategory={handleAddCategory}
+          onClose={() => setShowManager(false)}
+        />
       )}
 
       {toast && <div className="toast">{toast}</div>}
