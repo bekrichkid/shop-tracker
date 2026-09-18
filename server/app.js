@@ -7,10 +7,6 @@ export const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PRODUCTS_API = "https://fakestoreapi.com";
-// FakeStoreAPI rejects requests without a browser-like User-Agent (403) — Node's default fetch sends none.
-const UPSTREAM_HEADERS = { "User-Agent": "Mozilla/5.0 (compatible; shop-tracker/1.0)", Accept: "application/json" };
-
 function summarize(transactions) {
   const income = transactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
   const expense = transactions.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
@@ -24,41 +20,9 @@ function inRange(dateStr, from, to) {
   return true;
 }
 
-// ---- Products (proxied from FakeStoreAPI so the frontend never talks to a 3rd party directly) ----
-app.get("/api/products", async (req, res, next) => {
-  try {
-    const { category } = req.query;
-    const url = category
-      ? `${PRODUCTS_API}/products/category/${encodeURIComponent(category)}`
-      : `${PRODUCTS_API}/products`;
-    const upstream = await fetch(url, { headers: UPSTREAM_HEADERS });
-    if (!upstream.ok) throw new Error(`FakeStoreAPI ${upstream.status}`);
-    const products = await upstream.json();
-    res.json(
-      products.map((p) => ({
-        id: p.id,
-        title: p.title,
-        price: p.price,
-        description: p.description,
-        category: p.category,
-        image: p.image,
-        rating: p.rating,
-      }))
-    );
-  } catch (err) {
-    next(err);
-  }
-});
-
-app.get("/api/products/categories", async (req, res, next) => {
-  try {
-    const upstream = await fetch(`${PRODUCTS_API}/products/categories`, { headers: UPSTREAM_HEADERS });
-    if (!upstream.ok) throw new Error(`FakeStoreAPI ${upstream.status}`);
-    res.json(await upstream.json());
-  } catch (err) {
-    next(err);
-  }
-});
+// Note: product catalog browsing is fetched directly from FakeStoreAPI by the client
+// (see client/src/api.js) — Netlify Functions' server IPs get 403'd by its Cloudflare
+// bot protection, but real browser requests are allowed.
 
 // ---- Categories ----
 app.get("/api/categories", async (req, res, next) => {

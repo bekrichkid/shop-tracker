@@ -1,6 +1,10 @@
 import { API_BASE } from "./config.js";
 
 const BASE = `${API_BASE}/api`;
+// Called straight from the browser (not proxied through our backend): FakeStoreAPI's
+// Cloudflare bot protection blocks Netlify Functions' server IPs but allows CORS
+// requests from real browsers.
+const PRODUCTS_API = "https://fakestoreapi.com";
 
 async function request(path, options = {}) {
   const res = await fetch(BASE + path, {
@@ -15,9 +19,16 @@ async function request(path, options = {}) {
   return contentType.includes("application/json") ? res.json() : res.text();
 }
 
+async function fetchProducts(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Tovarlarni yuklab bo'lmadi: ${res.status}`);
+  return res.json();
+}
+
 export const api = {
-  getProducts: (category) => request(`/products${category ? `?category=${encodeURIComponent(category)}` : ""}`),
-  getProductCategories: () => request("/products/categories"),
+  getProducts: (category) =>
+    fetchProducts(category ? `${PRODUCTS_API}/products/category/${encodeURIComponent(category)}` : `${PRODUCTS_API}/products`),
+  getProductCategories: () => fetchProducts(`${PRODUCTS_API}/products/categories`),
 
   getTransactions: (params = {}) => {
     const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString();
