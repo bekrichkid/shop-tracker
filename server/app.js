@@ -8,6 +8,8 @@ app.use(cors());
 app.use(express.json());
 
 const PRODUCTS_API = "https://fakestoreapi.com";
+// FakeStoreAPI rejects requests without a browser-like User-Agent (403) — Node's default fetch sends none.
+const UPSTREAM_HEADERS = { "User-Agent": "Mozilla/5.0 (compatible; shop-tracker/1.0)", Accept: "application/json" };
 
 function summarize(transactions) {
   const income = transactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
@@ -29,7 +31,7 @@ app.get("/api/products", async (req, res, next) => {
     const url = category
       ? `${PRODUCTS_API}/products/category/${encodeURIComponent(category)}`
       : `${PRODUCTS_API}/products`;
-    const upstream = await fetch(url);
+    const upstream = await fetch(url, { headers: UPSTREAM_HEADERS });
     if (!upstream.ok) throw new Error(`FakeStoreAPI ${upstream.status}`);
     const products = await upstream.json();
     res.json(
@@ -50,7 +52,7 @@ app.get("/api/products", async (req, res, next) => {
 
 app.get("/api/products/categories", async (req, res, next) => {
   try {
-    const upstream = await fetch(`${PRODUCTS_API}/products/categories`);
+    const upstream = await fetch(`${PRODUCTS_API}/products/categories`, { headers: UPSTREAM_HEADERS });
     if (!upstream.ok) throw new Error(`FakeStoreAPI ${upstream.status}`);
     res.json(await upstream.json());
   } catch (err) {
