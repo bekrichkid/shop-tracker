@@ -143,5 +143,7 @@ export const RU = {
   "Demo to'lov (sinov)": "Демо-оплата (тест)",
   "Foyda": "Прибыль",
   "so'm": "сум",
+  "Sotuvchi": "Продавец",
+  "Ko'rinish rejimi": "Режим просмотра",
   "So'rov xato": "Ошибка запроса",
 };

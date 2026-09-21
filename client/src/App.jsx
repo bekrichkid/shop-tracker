@@ -157,9 +157,29 @@ export default function App() {
 
 function Shop({ user, theme, setTheme, onLogout }) {
   const tt = useT();
-  const isAdmin = Boolean(user.isAdmin);
+  // One login for everyone. An account listed in ADMIN_EMAILS can also switch between the seller
+  // panel and the plain customer view (to try the shop the way customers see it).
+  const canAdmin = Boolean(user.isAdmin);
+  const modeKey = `mode_${user.id}`;
+  const [mode, setMode] = useState(() => {
+    try {
+      return localStorage.getItem(modeKey) === "customer" ? "customer" : "admin";
+    } catch {
+      return "admin";
+    }
+  });
+  const isAdmin = canAdmin && mode === "admin";
   const TABS = isAdmin ? ADMIN_TABS : CUSTOMER_TABS;
   const [tab, setTab] = useState(isAdmin ? "overview" : "shop");
+  function switchMode(next) {
+    setMode(next);
+    setTab(next === "admin" ? "overview" : "shop");
+    try {
+      localStorage.setItem(modeKey, next);
+    } catch {
+      /* storage unavailable */
+    }
+  }
   const [transactions, setTransactions] = useState([]);
   const [categories, setCategories] = useState([]);
   const [budgets, setBudgets] = useState({});
@@ -225,7 +245,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
 
   // Finance data belongs to the seller only; customers have nothing to sync.
   const syncAll = useCallback(async () => {
-    if (!isAdmin) return null;
+    if (!canAdmin) return null;
     try {
       await api.adminSyncLedger();
       const [tx, cats, bud, g] = await Promise.all([api.getTransactions(), api.getCategories(), api.getBudgets(), api.getGoal()]);
@@ -239,7 +259,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
       setSynced(false);
       return null;
     }
-  }, [isAdmin]);
+  }, [canAdmin]);
 
   useEffect(() => {
     syncAll();
@@ -435,6 +455,12 @@ function Shop({ user, theme, setTheme, onLogout }) {
           <span className="brand-dot" aria-hidden="true" />
           <h1>Tovar Do'koni</h1>
         </div>
+        {canAdmin && (
+          <div className="mode-switch" role="group" aria-label={tt("Ko'rinish rejimi")}>
+            <button className={isAdmin ? "on" : ""} onClick={() => switchMode("admin")}>{tt("Sotuvchi")}</button>
+            <button className={!isAdmin ? "on" : ""} onClick={() => switchMode("customer")}>{tt("Mijoz")}</button>
+          </div>
+        )}
         <nav className="tabs" aria-label="Asosiy menyu" style={{ "--n": TABS.length }}>
           {TABS.map((t) => (
             <button key={t.key} className={"tab" + (tab === t.key ? " tab-on" : "")} onClick={() => setTab(t.key)} aria-current={tab === t.key ? "page" : undefined}>
@@ -484,7 +510,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
         {tab === "profile" && (
           <ProfileTab
             store={store}
-            user={user}
+            user={{ ...user, isAdmin }}
             theme={theme}
             onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
             onOpenCategories={() => setShowManager(true)}

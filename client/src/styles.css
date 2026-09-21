@@ -500,3 +500,8 @@ textarea { font: inherit; font-size: 16px; padding: 10px 12px; border: 1px solid
 .review-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .review p { margin: 6px 0 0; font-size: 14px; }
 .order-item-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+
+.mode-switch { display: inline-flex; background: var(--surface-2); border-radius: 999px; padding: 3px; margin-left: auto; }
+.mode-switch button { border: 0; background: none; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 700; color: var(--muted); transition: background .2s, color .2s; }
+.mode-switch button.on { background: var(--primary); color: var(--primary-ink); }
+@media (min-width: 768px) { .mode-switch { order: 3; margin-left: 12px; } }
