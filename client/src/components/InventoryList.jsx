@@ -37,8 +37,8 @@ export default function InventoryList({ items, onSell, onDelete }) {
   return (
     <>
       <ul className="list-card">
-        {items.map((item) => (
-          <li key={item.id} className="row-item">
+        {items.map((item, idx) => (
+          <li key={item.id} className="row-item" style={{ "--i": Math.min(idx, 8) }}>
             <img className="thumb" src={item.image} alt="" />
             <div className="row-main">
               <div className="row-title">{item.title}</div>

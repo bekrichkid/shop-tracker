@@ -29,6 +29,11 @@ Netlify muhit o'zgaruvchilari: `PAYME_MERCHANT_ID`, `PAYME_KEY`, `APP_URL`, ixti
 Kalitlar qo'yilmaguncha **Demo** to'lov ishlaydi (haqiqiy pul yechilmaydi); kalitlar qo'yilgach u avtomatik o'chadi.
 Merchant API to'liq qo'llab-quvvatlanadi: CheckPerform/Create/Perform/Cancel/CheckTransaction/GetStatement.
 
+## Katalog
+
+Tovarlar Postgres'dagi `products` jadvalida (birinchi ishga tushishda `server/catalog.json`'dan to'ldiriladi, rasmlar `client/public/products/`). `GET /api/products` ochiq. Buyurtmada narx va nom **faqat serverdagi katalogdan** olinadi, mijoz yuborgan narxga ishonilmaydi.
+`ADMIN_EMAILS` (Netlify env) ichidagi emaillar `GET/POST /api/admin/products`, `PUT /api/admin/products/:id` orqali tovar qo'shishi, narxini o'zgartirishi yoki `{"active":false}` bilan sotuvdan olishi mumkin.
+
 ## Mahalliy ishga tushirish
 
 ### 1. Postgres

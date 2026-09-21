@@ -237,6 +237,19 @@ function Shop({ user, theme, setTheme, onLogout }) {
     });
     showToast("Savatga qo'shildi");
   }
+  // The server catalog is the source of truth: refresh cart prices and drop delisted items.
+  const syncCartWithCatalog = useCallback((catalog) => {
+    const byId = new Map(catalog.map((p) => [p.id, p]));
+    setCart((prev) => {
+      const next = prev
+        .filter((i) => byId.has(i.productId))
+        .map((i) => {
+          const p = byId.get(i.productId);
+          return { ...i, title: p.title, image: p.image, category: p.category, unitPriceUsd: p.price };
+        });
+      return JSON.stringify(next) === JSON.stringify(prev) ? prev : next;
+    });
+  }, []);
   const changeQty = (id, q) =>
     setCart((prev) => (q < 1 ? prev.filter((i) => i.productId !== id) : prev.map((i) => (i.productId === id ? { ...i, quantity: Math.min(99, q) } : i))));
   const removeFromCart = (id) => setCart((prev) => prev.filter((i) => i.productId !== id));
@@ -345,7 +358,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
         </nav>
       </header>
 
-      <main className="content">
+      <main className="content" key={tab}>
         {tab === "dashboard" && (
           <div className="stack">
             <SummaryCards period={period} onPeriodChange={setPeriod} income={income} expense={expense} inventoryValue={inventoryValue} synced={synced} />
@@ -362,7 +375,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
           </div>
         )}
 
-        {tab === "shop" && <ProductGrid onAddToCart={addToCart} cartQty={cartQty} />}
+        {tab === "shop" && <ProductGrid onAddToCart={addToCart} cartQty={cartQty} onCatalog={syncCartWithCatalog} />}
 
         {tab === "inventory" && (
           <div className="stack">
@@ -415,7 +428,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
 
       {cartCount > 0 && !showCart && (
         <button className="cart-bar" onClick={() => setShowCart(true)}>
-          <span className="cart-count">{cartCount}</span>
+          <span className="cart-count" key={cartCount}>{cartCount}</span>
           <span>Savatni ko'rish</span>
           <b>{formatUzs(cartTotalUzs)}</b>
         </button>

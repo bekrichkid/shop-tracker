@@ -1,5 +1,6 @@
 import pg from "pg";
 import { nanoid } from "nanoid";
+import seedCatalog from "./catalog.json" with { type: "json" };
 
 const { Pool } = pg;
 
@@ -115,14 +116,50 @@ function ensureSchema() {
         );
         CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
         CREATE INDEX IF NOT EXISTS idx_items_order ON order_items(order_id);
+        CREATE TABLE IF NOT EXISTS products (
+          id SERIAL PRIMARY KEY,
+          title TEXT NOT NULL,
+          description TEXT,
+          category TEXT NOT NULL,
+          price_usd NUMERIC NOT NULL CHECK (price_usd > 0),
+          image TEXT,
+          rating_rate NUMERIC,
+          rating_count INT,
+          active BOOLEAN NOT NULL DEFAULT TRUE
+        );
         CREATE INDEX IF NOT EXISTS idx_pay_order ON payment_transactions(order_id);
         CREATE INDEX IF NOT EXISTS idx_tx_user ON transactions(user_id);
         CREATE INDEX IF NOT EXISTS idx_inv_user ON inventory(user_id);
         CREATE INDEX IF NOT EXISTS idx_cat_user ON categories(user_id);
       `);
+      // First run: load the starter catalog (keeps ids stable, then moves the sequence past them).
+      const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM products");
+      if (rows[0].n === 0) {
+        for (const p of seedCatalog) {
+          await pool.query(
+            `INSERT INTO products (id, title, description, category, price_usd, image, rating_rate, rating_count)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
+            [p.id, p.title, p.description, p.category, p.priceUsd, p.image, p.ratingRate, p.ratingCount]
+          );
+        }
+        await pool.query("SELECT setval(pg_get_serial_sequence('products','id'), (SELECT MAX(id) FROM products))");
+      }
     })();
   }
   return schemaReady;
+}
+
+function mapProduct(r) {
+  return {
+    id: r.id,
+    title: r.title,
+    description: r.description,
+    category: r.category,
+    price: Number(r.price_usd),
+    image: r.image,
+    rating: r.rating_rate == null ? null : { rate: Number(r.rating_rate), count: r.rating_count },
+    active: r.active,
+  };
 }
 
 function mapCategory(r) {
@@ -384,6 +421,42 @@ export const db = {
   },
 
   // ---- Orders & payments ----
+  // ---- Catalog ----
+  async listProducts({ includeInactive = false } = {}) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT * FROM products ${includeInactive ? "" : "WHERE active"} ORDER BY id`
+    );
+    return rows.map(mapProduct);
+  },
+  async getProducts(ids) {
+    await ensureSchema();
+    const { rows } = await pool.query("SELECT * FROM products WHERE id = ANY($1::int[]) AND active", [ids]);
+    return rows.map(mapProduct);
+  },
+  async createProduct(p) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `INSERT INTO products (title, description, category, price_usd, image, active)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [p.title, p.description || null, p.category, p.price, p.image || null, p.active !== false]
+    );
+    return mapProduct(rows[0]);
+  },
+  async updateProduct(id, p) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `UPDATE products SET
+         title = COALESCE($2, title), description = COALESCE($3, description),
+         category = COALESCE($4, category), price_usd = COALESCE($5, price_usd),
+         image = COALESCE($6, image), active = COALESCE($7, active)
+       WHERE id = $1 RETURNING *`,
+      [id, p.title ?? null, p.description ?? null, p.category ?? null, p.price ?? null, p.image ?? null, p.active ?? null]
+    );
+    return rows[0] ? mapProduct(rows[0]) : null;
+  },
+
+  // Items carry only { productId, quantity }: title, image and price always come from the catalog.
   async createOrder(userId, { items, fullName, phone, address, rate }) {
     await ensureSchema();
     const totalUsd = items.reduce((s, i) => s + i.unitPriceUsd * i.quantity, 0);

@@ -9,7 +9,7 @@ const SORTS = [
   { key: "rating", label: "Reyting bo'yicha" },
 ];
 
-export default function ProductGrid({ onAddToCart, cartQty }) {
+export default function ProductGrid({ onAddToCart, cartQty, onCatalog }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -22,7 +22,10 @@ export default function ProductGrid({ onAddToCart, cartQty }) {
     setError("");
     api
       .getProducts()
-      .then(setProducts)
+      .then((list) => {
+        setProducts(list);
+        onCatalog?.(list);
+      })
       .catch(() => setError("Tovarlarni yuklab bo'lmadi. Internetni tekshirib, qayta urinib ko'ring."))
       .finally(() => setLoading(false));
   }
@@ -79,17 +82,17 @@ export default function ProductGrid({ onAddToCart, cartQty }) {
 
       {!loading && !error && visible.length > 0 && (
         <div className="product-grid">
-          {visible.map((p) => (
-            <article key={p.id} className="product-card">
+          {visible.map((p, idx) => (
+            <article key={p.id} className="product-card" style={{ "--i": Math.min(idx, 10) }}>
               <div className="product-image-wrap">
-                <img src={p.image} alt={p.title} loading="lazy" />
+                <img src={p.image} alt={p.title} loading="lazy" width="200" height="200" />
               </div>
               <h3 className="product-title" title={p.title}>{p.title}</h3>
               <div className="product-meta">
                 <span className="product-price">{formatSum(p.price)}</span>
                 {p.rating && <span className="product-rating">★ {p.rating.rate}</span>}
               </div>
-              <button className="btn btn-primary btn-block" onClick={() => onAddToCart(p)}>
+              <button key={cartQty[p.id] || 0} className={"btn btn-primary btn-block" + (cartQty[p.id] ? " btn-added" : "")} onClick={() => onAddToCart(p)}>
                 {cartQty[p.id] ? `Savatda: ${cartQty[p.id]} · yana qo'shish` : "Savatga qo'shish"}
               </button>
             </article>

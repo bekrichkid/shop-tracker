@@ -6,10 +6,10 @@ export default function TransactionList({ transactions, categoryMap, onDelete })
   }
   return (
     <ul className="list-card">
-      {transactions.map((t) => {
+      {transactions.map((t, idx) => {
         const cat = categoryMap[t.category];
         return (
-          <li key={t.id} className="row-item">
+          <li key={t.id} className="row-item" style={{ "--i": Math.min(idx, 8) }}>
             <span className="dot" style={{ background: cat?.color || "#999" }} />
             <div className="row-main">
               <div className="row-title">{cat?.name || "Noma'lum"}</div>

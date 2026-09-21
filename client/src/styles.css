@@ -364,6 +364,45 @@ input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--primary)
 }
 
 
+/* ---------- Motion ---------- */
+@keyframes tab-in { from { opacity: 0; transform: translateY(10px); } }
+@keyframes card-in { from { opacity: 0; transform: translateY(16px) scale(0.97); } }
+@keyframes row-in { from { opacity: 0; transform: translateX(-10px); } }
+@keyframes bar-in { from { opacity: 0; transform: translateY(24px) scale(0.96); } }
+@keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.28); } 100% { transform: scale(1); } }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, -16px) scale(0.96); } }
+@keyframes hero-in { from { opacity: 0; transform: translateY(12px) scale(0.98); } }
+@keyframes bump { 0% { transform: scale(1); } 45% { transform: scale(1.04); } 100% { transform: scale(1); } }
+
+.content { animation: tab-in .3s ease-out; }
+.auth-card { animation: hero-in .5s cubic-bezier(.2, .8, .2, 1); }
+.hero { animation: hero-in .45s cubic-bezier(.2, .8, .2, 1); }
+.product-card:not(.skeleton) { animation: card-in .45s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--i, 0) * 45ms); }
+.product-card { transition: transform .2s ease, box-shadow .2s ease; }
+.product-image-wrap img { transition: transform .35s ease; }
+.list-card .row-item { animation: row-in .35s ease-out both; animation-delay: calc(var(--i, 0) * 35ms); }
+.cart-bar { animation: bar-in .35s cubic-bezier(.2, .8, .2, 1); transition: transform .15s ease; }
+.cart-bar:active { transform: scale(0.98); }
+.cart-count { animation: pop .35s ease-out; }
+.toast { animation: toast-in .28s cubic-bezier(.2, .8, .2, 1); }
+.btn-added { animation: bump .3s ease-out; }
+.chip { transition: background .2s, color .2s, border-color .2s, transform .1s; }
+.chip:active { transform: scale(0.95); }
+.tab svg { transition: transform .25s cubic-bezier(.3, 1.6, .5, 1); }
+.tab-on svg { transform: translateY(-2px) scale(1.12); }
+.qty button { transition: transform .1s, background .15s; }
+.qty button:active { transform: scale(0.85); }
+.order-card, .menu-item { transition: background .15s, transform .15s; }
+.menu-item:active { background: var(--surface-2); }
+.sheet-backdrop, .modal-backdrop { transition: opacity .2s; }
+
+@media (hover: hover) {
+  .product-card:hover { transform: translateY(-4px); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12); }
+  .product-card:hover .product-image-wrap img { transform: scale(1.07); }
+  .btn:not(:disabled):hover { filter: brightness(1.06); }
+  .chip:hover { border-color: var(--primary); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }

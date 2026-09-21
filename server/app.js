@@ -23,6 +23,10 @@ function signToken(user) {
   return jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: TOKEN_TTL });
 }
 
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+const isAdminEmail = (email) => ADMIN_EMAILS.includes(String(email).toLowerCase());
+const publicUser = (u) => ({ id: u.id, email: u.email, isAdmin: isAdminEmail(u.email) });
+
 function requireAuth(req, res, next) {
   const header = req.headers.authorization || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
@@ -69,7 +73,7 @@ app.post("/api/auth/register", async (req, res, next) => {
     if (problem) return res.status(400).json({ error: problem });
     if (await db.findUserByEmail(email)) return res.status(409).json({ error: "Bu email allaqachon ro'yxatdan o'tgan" });
     const user = await db.createUser(email, await bcrypt.hash(password, 10));
-    res.status(201).json({ token: signToken(user), user: { id: user.id, email: user.email } });
+    res.status(201).json({ token: signToken(user), user: publicUser(user) });
   } catch (err) {
     next(err);
   }
@@ -83,7 +87,7 @@ app.post("/api/auth/login", async (req, res, next) => {
     if (!user || !(await bcrypt.compare(password, user.password_hash))) {
       return res.status(401).json({ error: "Email yoki parol noto'g'ri" });
     }
-    res.json({ token: signToken(user), user: { id: user.id, email: user.email } });
+    res.json({ token: signToken(user), user: publicUser(user) });
   } catch (err) {
     next(err);
   }
@@ -93,7 +97,7 @@ app.get("/api/auth/me", requireAuth, async (req, res, next) => {
   try {
     const user = await db.findUserById(req.userId);
     if (!user) return res.status(401).json({ error: "Foydalanuvchi topilmadi" });
-    res.json({ user: { id: user.id, email: user.email } });
+    res.json({ user: publicUser(user) });
   } catch (err) {
     next(err);
   }
@@ -112,6 +116,16 @@ app.delete("/api/auth/account", requireAuth, async (req, res, next) => {
 // Payment provider callback: authenticated by the provider's own Basic credentials, not a user JWT.
 app.post("/api/payme", paymeHandler);
 
+// Public catalog (prices are authoritative here; orders never trust client-sent prices).
+app.get("/api/products", async (req, res, next) => {
+  try {
+    res.set("Cache-Control", "public, max-age=60");
+    res.json(await db.listProducts());
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Everything below requires a logged-in user.
 app.use("/api", requireAuth);
 
@@ -129,22 +143,27 @@ app.post("/api/orders", async (req, res, next) => {
     if (!Array.isArray(items) || items.length === 0 || items.length > 50) {
       return res.status(400).json({ error: "Savat bo'sh yoki juda katta" });
     }
-    const clean = [];
+    const wanted = new Map();
     for (const it of items) {
+      const productId = Number(it.productId);
       const quantity = Number(it.quantity);
-      const unitPriceUsd = Number(it.unitPriceUsd);
-      if (!it.title || !Number.isInteger(quantity) || quantity < 1 || quantity > 100 || !(unitPriceUsd > 0)) {
+      if (!Number.isInteger(productId) || !Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
         return res.status(400).json({ error: "Savatdagi tovar ma'lumoti noto'g'ri" });
       }
-      clean.push({
-        productId: it.productId ?? null,
-        title: String(it.title).slice(0, 300),
-        image: it.image ? String(it.image).slice(0, 500) : null,
-        category: it.category ? String(it.category).slice(0, 100) : null,
-        quantity,
-        unitPriceUsd,
-      });
+      wanted.set(productId, (wanted.get(productId) || 0) + quantity);
     }
+    const found = await db.getProducts([...wanted.keys()]);
+    if (found.length !== wanted.size) {
+      return res.status(400).json({ error: "Savatdagi ba'zi tovarlar endi sotuvda yo'q. Savatni yangilang" });
+    }
+    const clean = found.map((p) => ({
+      productId: p.id,
+      title: p.title,
+      image: p.image,
+      category: p.category,
+      quantity: Math.min(100, wanted.get(p.id)),
+      unitPriceUsd: p.price,
+    }));
     if (!fullName || String(fullName).trim().length < 2) return res.status(400).json({ error: "Ism-familiyani kiriting" });
     if (!PHONE_RE.test(String(phone || ""))) return res.status(400).json({ error: "Telefon raqami noto'g'ri" });
     if (!address || String(address).trim().length < 5) return res.status(400).json({ error: "Yetkazib berish manzilini kiriting" });
@@ -157,6 +176,70 @@ app.post("/api/orders", async (req, res, next) => {
       rate: paymentConfig().rate,
     });
     res.status(201).json(order);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---- Catalog admin (only emails listed in ADMIN_EMAILS) ----
+async function requireAdmin(req, res, next) {
+  try {
+    const user = await db.findUserById(req.userId);
+    if (!user || !isAdminEmail(user.email)) return res.status(403).json({ error: "Ruxsat yo'q" });
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+function parseProduct(body, { partial }) {
+  const out = {};
+  if (body.title !== undefined || !partial) {
+    const t = String(body.title || "").trim();
+    if (t.length < 2 || t.length > 300) return { error: "Tovar nomi 2–300 belgi bo'lishi kerak" };
+    out.title = t;
+  }
+  if (body.category !== undefined || !partial) {
+    const c = String(body.category || "").trim();
+    if (!c || c.length > 100) return { error: "Kategoriyani kiriting" };
+    out.category = c;
+  }
+  if (body.price !== undefined || !partial) {
+    const price = Number(body.price);
+    if (!(price > 0) || price > 1e7) return { error: "Narx noto'g'ri" };
+    out.price = price;
+  }
+  if (body.description !== undefined) out.description = String(body.description).slice(0, 2000);
+  if (body.image !== undefined) out.image = String(body.image).slice(0, 500);
+  if (body.active !== undefined) out.active = Boolean(body.active);
+  return { value: out };
+}
+
+app.get("/api/admin/products", requireAdmin, async (req, res, next) => {
+  try {
+    res.json(await db.listProducts({ includeInactive: true }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/admin/products", requireAdmin, async (req, res, next) => {
+  try {
+    const { value, error } = parseProduct(req.body, { partial: false });
+    if (error) return res.status(400).json({ error });
+    res.status(201).json(await db.createProduct(value));
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.put("/api/admin/products/:id", requireAdmin, async (req, res, next) => {
+  try {
+    const { value, error } = parseProduct(req.body, { partial: true });
+    if (error) return res.status(400).json({ error });
+    const updated = await db.updateProduct(Number(req.params.id), value);
+    if (!updated) return res.status(404).json({ error: "Tovar topilmadi" });
+    res.json(updated);
   } catch (err) {
     next(err);
   }
