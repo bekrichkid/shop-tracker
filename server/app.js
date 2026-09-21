@@ -182,6 +182,7 @@ app.post("/api/orders", async (req, res, next) => {
       category: p.category,
       quantity: Math.min(100, wanted.get(p.id)),
       unitPriceUsd: p.price,
+      unitCostUsd: p.cost,
     }));
     if (!fullName || String(fullName).trim().length < 2) return res.status(400).json({ error: "Ism-familiyani kiriting" });
     if (!PHONE_RE.test(String(phone || ""))) return res.status(400).json({ error: "Telefon raqami noto'g'ri" });
@@ -231,6 +232,14 @@ function parseProduct(body, { partial }) {
   if (body.description !== undefined) out.description = String(body.description).slice(0, 2000);
   if (body.image !== undefined) out.image = String(body.image).slice(0, 500);
   if (body.active !== undefined) out.active = Boolean(body.active);
+  if (body.cost !== undefined) {
+    if (body.cost === null || body.cost === "") out.cost = null;
+    else {
+      const c = Number(body.cost);
+      if (!(c >= 0) || c > 1e7) return { error: "Tannarx noto'g'ri" };
+      out.cost = c;
+    }
+  }
   if (body.stock !== undefined) {
     if (body.stock === null || body.stock === "") out.stock = null;
     else {
@@ -267,6 +276,14 @@ app.put("/api/admin/products/:id", requireAdmin, async (req, res, next) => {
     const updated = await db.updateProduct(Number(req.params.id), value);
     if (!updated) return res.status(404).json({ error: "Tovar topilmadi" });
     res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/admin/sync-ledger", requireAdmin, async (req, res, next) => {
+  try {
+    res.json({ added: await db.syncAdminLedger(req.userId) });
   } catch (err) {
     next(err);
   }

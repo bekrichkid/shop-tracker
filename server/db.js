@@ -128,6 +128,10 @@ function ensureSchema() {
           active BOOLEAN NOT NULL DEFAULT TRUE
         );
         ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INT;
+        ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_usd NUMERIC;
+        ALTER TABLE order_items ADD COLUMN IF NOT EXISTS unit_cost_usd NUMERIC;
+        ALTER TABLE transactions ADD COLUMN IF NOT EXISTS order_id TEXT;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_order_type ON transactions(user_id, order_id, type) WHERE order_id IS NOT NULL;
         ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment TEXT NOT NULL DEFAULT 'new';
         ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment_at BIGINT;
         ALTER TABLE orders ADD COLUMN IF NOT EXISTS admin_note TEXT;
@@ -162,8 +166,9 @@ function ensureSchema() {
   return schemaReady;
 }
 
-function mapProduct(r) {
+function mapProduct(r, admin = false) {
   return {
+    ...(admin ? { cost: r.cost_usd == null ? null : Number(r.cost_usd) } : {}),
     id: r.id,
     title: r.title,
     description: r.description,
@@ -309,8 +314,11 @@ export const db = {
     await pool.query("DELETE FROM inventory WHERE user_id = $1", [userId]);
     await pool.query("DELETE FROM categories WHERE user_id = $1", [userId]);
     await pool.query("DELETE FROM goals WHERE user_id = $1", [userId]);
-    await pool.query("DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE user_id = $1)", [userId]);
-    await pool.query("DELETE FROM orders WHERE user_id = $1", [userId]);
+    // Orders are the shop's sales records: keep them for accounting but strip the person's details.
+    await pool.query(
+      "UPDATE orders SET user_id = 'deleted', full_name = 'O''chirilgan hisob', phone = NULL, address = NULL WHERE user_id = $1",
+      [userId]
+    );
     await pool.query("DELETE FROM users WHERE id = $1", [userId]);
   },
 
@@ -445,21 +453,21 @@ export const db = {
     const { rows } = await pool.query(
       `SELECT * FROM products ${includeInactive ? "" : "WHERE active"} ORDER BY id`
     );
-    return rows.map(mapProduct);
+    return rows.map((r) => mapProduct(r, includeInactive));
   },
   async getProducts(ids) {
     await ensureSchema();
     const { rows } = await pool.query("SELECT * FROM products WHERE id = ANY($1::int[]) AND active", [ids]);
-    return rows.map(mapProduct);
+    return rows.map((r) => mapProduct(r, true)); // internal use (order pricing); never sent to customers as-is
   },
   async createProduct(p) {
     await ensureSchema();
     const { rows } = await pool.query(
-      `INSERT INTO products (title, description, category, price_usd, image, active, stock)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [p.title, p.description || null, p.category, p.price, p.image || null, p.active !== false, p.stock ?? null]
+      `INSERT INTO products (title, description, category, price_usd, image, active, stock, cost_usd)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [p.title, p.description || null, p.category, p.price, p.image || null, p.active !== false, p.stock ?? null, p.cost ?? null]
     );
-    return mapProduct(rows[0]);
+    return mapProduct(rows[0], true);
   },
   async updateProduct(id, p) {
     await ensureSchema();
@@ -468,12 +476,13 @@ export const db = {
          title = COALESCE($2, title), description = COALESCE($3, description),
          category = COALESCE($4, category), price_usd = COALESCE($5, price_usd),
          image = COALESCE($6, image), active = COALESCE($7, active),
-         stock = CASE WHEN $8 THEN $9::int ELSE stock END
+         stock = CASE WHEN $8 THEN $9::int ELSE stock END,
+         cost_usd = CASE WHEN $10 THEN $11::numeric ELSE cost_usd END
        WHERE id = $1 RETURNING *`,
       [id, p.title ?? null, p.description ?? null, p.category ?? null, p.price ?? null, p.image ?? null, p.active ?? null,
-       p.stock !== undefined, p.stock ?? null]
+       p.stock !== undefined, p.stock ?? null, p.cost !== undefined, p.cost ?? null]
     );
-    return rows[0] ? mapProduct(rows[0]) : null;
+    return rows[0] ? mapProduct(rows[0], true) : null;
   },
 
   // Items carry only { productId, quantity }: title, image and price always come from the catalog.
@@ -492,9 +501,9 @@ export const db = {
       );
       for (const it of items) {
         await client.query(
-          `INSERT INTO order_items (id, order_id, product_id, title, image, category, quantity, unit_price_usd)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [nanoid(10), id, it.productId || null, it.title, it.image || null, it.category || null, it.quantity, it.unitPriceUsd]
+          `INSERT INTO order_items (id, order_id, product_id, title, image, category, quantity, unit_price_usd, unit_cost_usd)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [nanoid(10), id, it.productId || null, it.title, it.image || null, it.category || null, it.quantity, it.unitPriceUsd, it.unitCostUsd ?? null]
         );
       }
       await client.query("COMMIT");
@@ -548,29 +557,11 @@ export const db = {
         await client.query("ROLLBACK");
         return false;
       }
-      const order = rows[0];
-      const { rows: items } = await client.query("SELECT * FROM order_items WHERE order_id = $1", [orderId]);
-      const catQ = await client.query(
-        "SELECT id FROM categories WHERE user_id = $1 AND type = 'expense' ORDER BY (name = 'Tovar xaridi') DESC LIMIT 1",
-        [order.user_id]
-      );
-      const categoryId = catQ.rows[0]?.id || "";
-      const when = new Date().toISOString();
+      const { rows: items } = await client.query("SELECT product_id, quantity FROM order_items WHERE order_id = $1", [orderId]);
       for (const it of items) {
         if (it.product_id != null) {
           await client.query("UPDATE products SET stock = GREATEST(stock - $2, 0) WHERE id = $1 AND stock IS NOT NULL", [it.product_id, it.quantity]);
         }
-        const invId = nanoid(10);
-        await client.query(
-          `INSERT INTO inventory (id, product_id, title, image, category, quantity, purchase_price, purchased_at, status, user_id, order_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'holding',$9,$10)`,
-          [invId, it.product_id, it.title, it.image, it.category, it.quantity, it.unit_price_usd, when, order.user_id, orderId]
-        );
-        await client.query(
-          `INSERT INTO transactions (id, type, amount, category, note, date, created_at, inventory_id, user_id)
-           VALUES ($1,'expense',$2,$3,$4,$5,$6,$7,$8)`,
-          [nanoid(10), Number(it.unit_price_usd) * it.quantity, categoryId, `Xarid: ${it.title}`, when, Date.now(), invId, order.user_id]
-        );
       }
       await client.query("COMMIT");
       return true;
@@ -581,26 +572,24 @@ export const db = {
       client.release();
     }
   },
-  // Refund of a paid order: only possible while none of its goods were sold.
+  // Refund of a paid order (provider-initiated cancel): only while the goods have not left the shop.
   async refundPaidOrder(orderId) {
     await ensureSchema();
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      const { rows: inv } = await client.query("SELECT id, status FROM inventory WHERE order_id = $1", [orderId]);
-      if (inv.some((i) => i.status !== "holding")) {
+      const { rows } = await client.query("SELECT status, fulfillment FROM orders WHERE id = $1 FOR UPDATE", [orderId]);
+      if (!rows[0] || rows[0].status !== "paid" || ["shipped", "delivered"].includes(rows[0].fulfillment)) {
         await client.query("ROLLBACK");
         return false;
       }
-      const ids = inv.map((i) => i.id);
-      const { rows: ordItems } = await client.query("SELECT product_id, quantity FROM order_items WHERE order_id = $1", [orderId]);
-      for (const it of ordItems) {
+      const { rows: items } = await client.query("SELECT product_id, quantity FROM order_items WHERE order_id = $1", [orderId]);
+      for (const it of items) {
         if (it.product_id != null) {
           await client.query("UPDATE products SET stock = stock + $2 WHERE id = $1 AND stock IS NOT NULL", [it.product_id, it.quantity]);
         }
       }
-      await client.query("DELETE FROM transactions WHERE inventory_id = ANY($1)", [ids]);
-      await client.query("DELETE FROM inventory WHERE order_id = $1", [orderId]);
+      await client.query("DELETE FROM transactions WHERE order_id = $1", [orderId]);
       await client.query("UPDATE orders SET status = 'cancelled' WHERE id = $1", [orderId]);
       await client.query("COMMIT");
       return true;
@@ -610,6 +599,45 @@ export const db = {
     } finally {
       client.release();
     }
+  },
+
+  // Books paid orders into an admin's own ledger: revenue as income, cost of goods as expense.
+  // Idempotent (unique per user/order/type), so it can be called on every admin refresh.
+  async syncAdminLedger(userId) {
+    await ensureSchema();
+    const catId = async (type, preferred) => {
+      const { rows } = await pool.query(
+        "SELECT id FROM categories WHERE user_id = $1 AND type = $2 ORDER BY (name = $3) DESC LIMIT 1",
+        [userId, type, preferred]
+      );
+      return rows[0]?.id || "";
+    };
+    const incomeCat = await catId("income", "Sotuvdan tushum");
+    const expenseCat = await catId("expense", "Tovar xaridi");
+    const { rows: orders } = await pool.query(
+      `SELECT o.id, o.total_usd, o.paid_at,
+              COALESCE((SELECT SUM(i.quantity * i.unit_cost_usd) FROM order_items i WHERE i.order_id = o.id), 0) AS cogs
+       FROM orders o
+       WHERE o.status = 'paid'
+         AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.user_id = $1 AND t.order_id = o.id AND t.type = 'income')`,
+      [userId]
+    );
+    for (const o of orders) {
+      const when = new Date(Number(o.paid_at) || Date.now()).toISOString();
+      await pool.query(
+        `INSERT INTO transactions (id, type, amount, category, note, date, created_at, user_id, order_id)
+         VALUES ($1,'income',$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`,
+        [nanoid(10), Number(o.total_usd), incomeCat, `Buyurtma #${o.id}`, when, Date.now(), userId, o.id]
+      );
+      if (Number(o.cogs) > 0) {
+        await pool.query(
+          `INSERT INTO transactions (id, type, amount, category, note, date, created_at, user_id, order_id)
+           VALUES ($1,'expense',$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`,
+          [nanoid(10), Number(o.cogs), expenseCat, `Tannarx: buyurtma #${o.id}`, when, Date.now(), userId, o.id]
+        );
+      }
+    }
+    return orders.length;
   },
 
   // ---- Company (admin) side ----
@@ -647,7 +675,13 @@ export const db = {
         "SELECT COALESCE(SUM(total_uzs),0)::bigint AS uzs, COUNT(*)::int AS n FROM orders WHERE status = 'paid' AND paid_at >= $1",
         [since]
       );
-      return { uzs: Number(rows[0].uzs), orders: rows[0].n };
+      const { rows: c } = await pool.query(
+        `SELECT COALESCE(SUM(i.quantity * i.unit_cost_usd * o.rate),0)::bigint AS cogs
+         FROM order_items i JOIN orders o ON o.id = i.order_id WHERE o.status = 'paid' AND o.paid_at >= $1`,
+        [since]
+      );
+      const cogs = Number(c[0].cogs);
+      return { uzs: Number(rows[0].uzs), orders: rows[0].n, cogs, profit: Number(rows[0].uzs) - cogs };
     };
     const [today, week, month, all] = await Promise.all([sum(startOfToday.getTime()), sum(now - 7 * day), sum(now - 30 * day), sum(0)]);
     const { rows: byStatus } = await pool.query(

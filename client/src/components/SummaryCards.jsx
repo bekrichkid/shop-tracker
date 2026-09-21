@@ -15,7 +15,7 @@ export default function SummaryCards({ period, onPeriodChange, income, expense, 
   const shownBalance = useCountUp(balance);
   const shownIncome = useCountUp(income);
   const shownExpense = useCountUp(expense);
-  const shownInventory = useCountUp(inventoryValue);
+  const shownInventory = useCountUp(inventoryValue || 0);
   return (
     <section className="summary">
       <div className="chip-row" role="tablist" aria-label="Davr">
@@ -39,10 +39,12 @@ export default function SummaryCards({ period, onPeriodChange, income, expense, 
             <span className="hero-mini-label">Xarajat</span>
             <b className="neg-on-dark">{formatSum(round2(shownExpense))}</b>
           </div>
-          <div>
-            <span className="hero-mini-label">Omborda</span>
-            <b>{formatSum(round2(shownInventory))}</b>
-          </div>
+          {inventoryValue != null && (
+            <div>
+              <span className="hero-mini-label">Omborda</span>
+              <b>{formatSum(round2(shownInventory))}</b>
+            </div>
+          )}
         </div>
       </div>
     </section>

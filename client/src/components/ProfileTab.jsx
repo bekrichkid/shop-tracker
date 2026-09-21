@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-export default function ProfileTab({ store, onOpenAdmin, user, theme, onToggleTheme, onOpenCategories, onOpenOrders, onExport, onLogout, onDeleteAccount }) {
+export default function ProfileTab({ store, user, theme, onToggleTheme, onOpenCategories, onExport, onLogout, onDeleteAccount }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -19,33 +19,23 @@ export default function ProfileTab({ store, onOpenAdmin, user, theme, onToggleTh
         <div className="avatar" aria-hidden="true">{(user?.email || "?")[0].toUpperCase()}</div>
         <div>
           <div className="profile-email">{user?.email}</div>
-          <div className="muted small">Shaxsiy hisob</div>
+          <div className="muted small">{user?.isAdmin ? "Sotuvchi (administrator)" : "Mijoz"}</div>
         </div>
       </div>
 
-      {user?.isAdmin && (
-        <button className="admin-entry" onClick={onOpenAdmin}>
-          <span>
-            <b>Boshqaruv paneli</b>
-            <span className="muted small">Buyurtmalar, tovarlar va statistika</span>
-          </span>
-          <span className="chev">›</span>
-        </button>
-      )}
-
       <div className="menu-list">
-        <button className="menu-item" onClick={onOpenOrders}>
-          <span>Buyurtmalarim</span>
-          <span className="chev">›</span>
-        </button>
-        <button className="menu-item" onClick={onOpenCategories}>
-          <span>Kategoriyalar va oylik limitlar</span>
-          <span className="chev">›</span>
-        </button>
-        <button className="menu-item" onClick={onExport}>
-          <span>Tranzaksiyalarni CSV qilib yuklash</span>
-          <span className="chev">›</span>
-        </button>
+        {user?.isAdmin && (
+          <>
+            <button className="menu-item" onClick={onOpenCategories}>
+              <span>Moliya kategoriyalari va oylik limitlar</span>
+              <span className="chev">›</span>
+            </button>
+            <button className="menu-item" onClick={onExport}>
+              <span>Moliya yozuvlarini CSV qilib yuklash</span>
+              <span className="chev">›</span>
+            </button>
+          </>
+        )}
         <button className="menu-item" onClick={onToggleTheme}>
           <span>Ko'rinish: {theme === "light" ? "Kunduzgi" : "Tungi"}</span>
           <span className="chev">›</span>
@@ -72,7 +62,7 @@ export default function ProfileTab({ store, onOpenAdmin, user, theme, onToggleTh
 
       <div className="danger-zone">
         <h3>Hisobni o'chirish</h3>
-        <p className="muted small">Hisobingiz va barcha tranzaksiyalar, ombor, kategoriyalar butunlay o'chiriladi. Buni qaytarib bo'lmaydi.</p>
+        <p className="muted small">Hisobingiz va buyurtmalar tarixi butunlay o'chiriladi. Buni qaytarib bo'lmaydi.</p>
         {!confirming ? (
           <button className="btn btn-danger-outline" onClick={() => setConfirming(true)}>Hisobni o'chirish</button>
         ) : (

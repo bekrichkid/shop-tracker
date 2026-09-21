@@ -8,13 +8,12 @@ import Filters from "./components/Filters.jsx";
 import TransactionList from "./components/TransactionList.jsx";
 import ChartsPanel from "./components/ChartsPanel.jsx";
 import ProductGrid from "./components/ProductGrid.jsx";
-import InventoryList from "./components/InventoryList.jsx";
 import CategoryManager from "./components/CategoryManager.jsx";
 import ProfileTab from "./components/ProfileTab.jsx";
 import CartSheet from "./components/CartSheet.jsx";
 import ProductSheet from "./components/ProductSheet.jsx";
-import AdminPanel from "./components/AdminPanel.jsx";
-import OrdersSheet from "./components/OrdersSheet.jsx";
+import { AdminOverview, AdminOrders, AdminProducts } from "./components/AdminViews.jsx";
+import OrdersList from "./components/OrdersList.jsx";
 import { formatUzs } from "./format.js";
 
 const emptyFilters = { type: "", category: "", q: "" };
@@ -42,10 +41,30 @@ const Icon = {
   ),
 };
 
-const TABS = [
-  { key: "dashboard", label: "Bosh sahifa", icon: Icon.home },
+Icon.chart = (
+  <>
+    <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
+  </>
+);
+Icon.wallet = (
+  <>
+    <path d="M3 7a2 2 0 0 1 2-2h14v4" />
+    <path d="M3 7v11a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1V9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2" />
+    <path d="M16 14h2" />
+  </>
+);
+
+// Customers only shop and follow their orders; the seller runs the whole business.
+const CUSTOMER_TABS = [
   { key: "shop", label: "Do'kon", icon: Icon.shop },
-  { key: "inventory", label: "Omborim", icon: Icon.box },
+  { key: "orders", label: "Buyurtmalarim", icon: Icon.box },
+  { key: "profile", label: "Profil", icon: Icon.user },
+];
+const ADMIN_TABS = [
+  { key: "overview", label: "Umumiy", icon: Icon.chart },
+  { key: "orders", label: "Buyurtmalar", icon: Icon.box },
+  { key: "products", label: "Tovarlar", icon: Icon.shop },
+  { key: "finance", label: "Moliya", icon: Icon.wallet },
   { key: "profile", label: "Profil", icon: Icon.user },
 ];
 
@@ -95,12 +114,13 @@ export default function App() {
 }
 
 function Shop({ user, theme, setTheme, onLogout }) {
-  const [tab, setTab] = useState("dashboard");
+  const isAdmin = Boolean(user.isAdmin);
+  const TABS = isAdmin ? ADMIN_TABS : CUSTOMER_TABS;
+  const [tab, setTab] = useState(isAdmin ? "overview" : "shop");
   const [transactions, setTransactions] = useState([]);
   const [categories, setCategories] = useState([]);
   const [budgets, setBudgets] = useState({});
   const [goal, setGoal] = useState({});
-  const [inventory, setInventory] = useState([]);
   const [period, setPeriod] = useState("month");
   const [filters, setFilters] = useState(emptyFilters);
   const [synced, setSynced] = useState(true);
@@ -108,8 +128,6 @@ function Shop({ user, theme, setTheme, onLogout }) {
   const [showManager, setShowManager] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showCart, setShowCart] = useState(false);
-  const [showOrders, setShowOrders] = useState(false);
-  const [showAdmin, setShowAdmin] = useState(false);
   const [openProduct, setOpenProduct] = useState(null);
   const [store, setStore] = useState(null);
   const [providers, setProviders] = useState([]);
@@ -139,27 +157,23 @@ function Shop({ user, theme, setTheme, onLogout }) {
     api.getStore().then(setStore).catch(() => {});
   }, []);
 
+  // Finance data belongs to the seller only; customers have nothing to sync.
   const syncAll = useCallback(async () => {
+    if (!isAdmin) return null;
     try {
-      const [tx, cats, bud, g, inv] = await Promise.all([
-        api.getTransactions(),
-        api.getCategories(),
-        api.getBudgets(),
-        api.getGoal(),
-        api.getInventory("holding"),
-      ]);
+      await api.adminSyncLedger();
+      const [tx, cats, bud, g] = await Promise.all([api.getTransactions(), api.getCategories(), api.getBudgets(), api.getGoal()]);
       setTransactions(tx);
       setCategories(cats);
       setBudgets(bud);
       setGoal(g);
-      setInventory(inv);
       setSynced(true);
       return tx;
     } catch {
       setSynced(false);
       return null;
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     syncAll();
@@ -192,7 +206,6 @@ function Shop({ user, theme, setTheme, onLogout }) {
   const monthExpense = useMemo(() => sum(monthTransactions, "expense"), [monthTransactions]);
   const income = useMemo(() => sum(periodTransactions, "income"), [periodTransactions]);
   const expense = useMemo(() => sum(periodTransactions, "expense"), [periodTransactions]);
-  const inventoryValue = useMemo(() => inventory.reduce((s, i) => s + i.purchasePrice * i.quantity, 0), [inventory]);
 
   const filteredList = useMemo(
     () =>
@@ -291,9 +304,8 @@ function Shop({ user, theme, setTheme, onLogout }) {
     if (res.redirect) return goToPayment(res.redirect, res.orderId);
     setCart([]);
     setShowCart(false);
-    await syncAll();
-    setTab("inventory");
-    showToast("To'lov qabul qilindi. Tovar omboringizga qo'shildi");
+    setTab("orders");
+    showToast("To'lov qabul qilindi. Buyurtmangiz qabul qilindi");
   }
 
   // Returning from the payment page (?order=ID): confirm the result with the server.
@@ -310,9 +322,8 @@ function Shop({ user, theme, setTheme, onLogout }) {
           const order = await api.getOrder(orderId);
           if (order.status === "paid") {
             setCart([]);
-            await syncAll();
-            setTab("inventory");
-            showToast("To'lov qabul qilindi. Tovar omboringizga qo'shildi");
+            setTab("orders");
+            showToast("To'lov qabul qilindi. Buyurtmangiz qabul qilindi");
             return finish();
           }
           if (order.status === "cancelled") {
@@ -325,7 +336,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
         await new Promise((r) => setTimeout(r, 2000));
       }
       if (!cancelled) {
-        showToast("To'lov tekshirilmoqda. Holatni Profil → Buyurtmalarim bo'limida ko'ring");
+        showToast("To'lov tekshirilmoqda. Holatni Buyurtmalarim bo'limida ko'ring");
         finish();
       }
     })();
@@ -334,9 +345,6 @@ function Shop({ user, theme, setTheme, onLogout }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const handleSell = (id, price) =>
-    act(() => api.sellItem(id, price), (r) => `Sotildi. ${r.profit >= 0 ? "Foyda" : "Zarar"}: ${Math.abs(r.profit).toFixed(2)} $`);
-  const handleDeleteInventory = (id) => act(() => api.deleteInventory(id));
   const handleAddCategory = (data) => act(() => api.addCategory(data));
   const handleDeleteCategory = (id) => act(() => api.deleteCategory(id));
   const handleSetBudget = (id, limit) => act(() => api.setBudget(id, limit));
@@ -365,7 +373,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
           <span className="brand-dot" aria-hidden="true" />
           <h1>Tovar Do'koni</h1>
         </div>
-        <nav className="tabs" aria-label="Asosiy menyu">
+        <nav className="tabs" aria-label="Asosiy menyu" style={{ "--n": TABS.length }}>
           {TABS.map((t) => (
             <button key={t.key} className={"tab" + (tab === t.key ? " tab-on" : "")} onClick={() => setTab(t.key)} aria-current={tab === t.key ? "page" : undefined}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -378,14 +386,19 @@ function Shop({ user, theme, setTheme, onLogout }) {
       </header>
 
       <main className="content" key={tab}>
-        {tab === "dashboard" && (
+        {tab === "overview" && isAdmin && <AdminOverview onOpenOrders={() => setTab("orders")} />}
+        {tab === "orders" && isAdmin && <AdminOrders onToast={showToast} />}
+        {tab === "products" && isAdmin && <AdminProducts onToast={showToast} />}
+
+        {tab === "finance" && isAdmin && (
           <div className="stack">
-            <SummaryCards period={period} onPeriodChange={setPeriod} income={income} expense={expense} inventoryValue={inventoryValue} synced={synced} />
+            <SummaryCards period={period} onPeriodChange={setPeriod} income={income} expense={expense} inventoryValue={null} synced={synced} />
             <GoalCard goal={goal} monthIncome={monthIncome} monthExpense={monthExpense} onSetGoal={handleSetGoal} />
             <div className="section-head">
-              <h2>Tranzaksiyalar</h2>
-              <button className="btn btn-small btn-primary" onClick={() => setShowAdd(true)}>+ Yozuv qo'shish</button>
+              <h2>Moliya yozuvlari</h2>
+              <button className="btn btn-small btn-primary" onClick={() => setShowAdd(true)}>+ Xarajat / daromad</button>
             </div>
+            <p className="muted small">Buyurtmalar tushumi va tannarxi avtomatik yoziladi. Ijara, reklama, yetkazib berish kabi boshqa xarajatlarni shu yerga qo'shing.</p>
             <Filters categories={categories} filters={filters} onChange={setFilters} />
             <TransactionList transactions={filteredList} categoryMap={categoryMap} onDelete={handleDelete} />
             {transactions.length > 0 && (
@@ -394,27 +407,19 @@ function Shop({ user, theme, setTheme, onLogout }) {
           </div>
         )}
 
-        {tab === "shop" && <ProductGrid onAddToCart={addToCart} cartQty={cartQty} onCatalog={syncCartWithCatalog} onOpen={setOpenProduct} />}
+        {tab === "shop" && !isAdmin && <ProductGrid onAddToCart={addToCart} cartQty={cartQty} onCatalog={syncCartWithCatalog} onOpen={setOpenProduct} />}
 
-        {tab === "inventory" && (
-          <div className="stack">
-            <div className="section-head">
-              <h2>Omborim</h2>
-              <span className="muted small">Jami: {inventoryValue.toFixed(2)} $</span>
-            </div>
-            <InventoryList items={inventory} onSell={handleSell} onDelete={handleDeleteInventory} />
-          </div>
+        {tab === "orders" && !isAdmin && (
+          <OrdersList providers={providers} onRedirect={goToPayment} onChanged={syncAll} onReorder={reorder} />
         )}
 
         {tab === "profile" && (
           <ProfileTab
             store={store}
-            onOpenAdmin={() => setShowAdmin(true)}
             user={user}
             theme={theme}
             onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
             onOpenCategories={() => setShowManager(true)}
-            onOpenOrders={() => setShowOrders(true)}
             onExport={handleExport}
             onLogout={onLogout}
             onDeleteAccount={handleDeleteAccount}
@@ -474,15 +479,9 @@ function Shop({ user, theme, setTheme, onLogout }) {
         />
       )}
 
-      {showOrders && (
-        <OrdersSheet providers={providers} onClose={() => setShowOrders(false)} onRedirect={goToPayment} onChanged={syncAll} onReorder={reorder} />
-      )}
-
       {openProduct && (
         <ProductSheet product={openProduct} inCart={cartQty[openProduct.id]} rate={rate} onAdd={addToCart} onClose={() => setOpenProduct(null)} />
       )}
-
-      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} onToast={showToast} />}
 
       {toast && <div className="toast" role="status">{toast}</div>}
     </div>

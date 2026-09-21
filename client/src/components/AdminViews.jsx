@@ -17,7 +17,7 @@ const NEXT = {
   shipped: { to: "delivered", label: "Yetkazildi deb belgilash" },
 };
 
-function Stats() {
+export function AdminOverview({ onOpenOrders }) {
   const [s, setS] = useState(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -28,11 +28,24 @@ function Stats() {
   const active = (s.byStatus.new || 0) + (s.byStatus.processing || 0) + (s.byStatus.shipped || 0);
   return (
     <div className="stack">
+      {(s.byStatus.new || 0) > 0 && (
+        <button className="admin-entry" onClick={onOpenOrders}>
+          <span>
+            <b>{s.byStatus.new} ta yangi buyurtma kutmoqda</b>
+            <span className="muted small">Ko'rib chiqish uchun bosing</span>
+          </span>
+          <span className="chev">›</span>
+        </button>
+      )}
       <div className="stat-grid">
-        <div className="stat"><span className="muted small">Bugun</span><b>{formatUzs(s.today.uzs)}</b><span className="small muted">{s.today.orders} ta buyurtma</span></div>
-        <div className="stat"><span className="muted small">7 kun</span><b>{formatUzs(s.week.uzs)}</b><span className="small muted">{s.week.orders} ta buyurtma</span></div>
-        <div className="stat"><span className="muted small">30 kun</span><b>{formatUzs(s.month.uzs)}</b><span className="small muted">{s.month.orders} ta buyurtma</span></div>
-        <div className="stat"><span className="muted small">Jami</span><b>{formatUzs(s.all.uzs)}</b><span className="small muted">{s.all.orders} ta buyurtma</span></div>
+        {[["Bugun", s.today], ["7 kun", s.week], ["30 kun", s.month], ["Jami", s.all]].map(([label, v]) => (
+          <div className="stat" key={label}>
+            <span className="muted small">{label}</span>
+            <b>{formatUzs(v.uzs)}</b>
+            <span className="small muted">{v.orders} ta buyurtma</span>
+            <span className={"small " + (v.profit >= 0 ? "pos" : "neg")}>Foyda: {formatUzs(v.profit)}</span>
+          </div>
+        ))}
       </div>
       <div className="stat-grid">
         <div className="stat"><span className="muted small">Bajarilishi kerak</span><b>{active}</b></div>
@@ -65,7 +78,7 @@ function Stats() {
   );
 }
 
-function Orders({ onToast }) {
+export function AdminOrders({ onToast }) {
   const [view, setView] = useState("new");
   const [orders, setOrders] = useState(null);
   const [error, setError] = useState("");
@@ -160,9 +173,9 @@ function NoteField({ initial, onSave }) {
   );
 }
 
-const emptyForm = { title: "", category: "", price: "", image: "", stock: "", description: "" };
+const emptyForm = { title: "", category: "", price: "", cost: "", image: "", stock: "", description: "" };
 
-function Products({ onToast }) {
+export function AdminProducts({ onToast }) {
   const [list, setList] = useState(null);
   const [error, setError] = useState("");
   const [edit, setEdit] = useState(null); // null | "new" | product
@@ -178,7 +191,7 @@ function Products({ onToast }) {
     setError("");
     setEdit(p);
     setForm(p === "new" ? emptyForm : {
-      title: p.title, category: p.category, price: String(p.price), image: p.image || "",
+      title: p.title, category: p.category, price: String(p.price), cost: p.cost === null || p.cost === undefined ? "" : String(p.cost), image: p.image || "",
       stock: p.stock === null || p.stock === undefined ? "" : String(p.stock), description: p.description || "",
     });
   }
@@ -188,7 +201,7 @@ function Products({ onToast }) {
     setBusy(true);
     setError("");
     const body = {
-      title: form.title, category: form.category, price: Number(form.price), image: form.image, description: form.description,
+      title: form.title, category: form.category, price: Number(form.price), cost: form.cost === "" ? null : Number(form.cost), image: form.image, description: form.description,
       stock: form.stock === "" ? null : Number(form.stock),
     };
     try {
@@ -226,6 +239,7 @@ function Products({ onToast }) {
         <label className="field"><span>Nomi</span><input required value={form.title} onChange={set("title")} /></label>
         <label className="field"><span>Kategoriya</span><input required value={form.category} onChange={set("category")} placeholder="masalan: kiyim" /></label>
         <label className="field"><span>Narx (USD)</span><input required type="number" step="0.01" min="0.01" inputMode="decimal" value={form.price} onChange={set("price")} /></label>
+        <label className="field"><span>Tannarx (USD, foyda hisoblash uchun)</span><input type="number" step="0.01" min="0" inputMode="decimal" value={form.cost} onChange={set("cost")} /></label>
         <label className="field"><span>Zaxira (bo'sh = cheksiz)</span><input type="number" min="0" step="1" inputMode="numeric" value={form.stock} onChange={set("stock")} /></label>
         <label className="field"><span>Rasm manzili (URL yoki /products/x.png)</span><input value={form.image} onChange={set("image")} /></label>
         <label className="field"><span>Tavsif</span><textarea rows="3" value={form.description} onChange={set("description")} /></label>
@@ -246,7 +260,7 @@ function Products({ onToast }) {
               <img className="thumb" src={p.image} alt="" />
               <div className="row-main">
                 <div className="row-title">{p.title}</div>
-                <div className="row-sub">{formatSum(p.price)} · {p.stock === null || p.stock === undefined ? "zaxira cheksiz" : `${p.stock} dona`}{p.active ? "" : " · yashirin"}</div>
+                <div className="row-sub">{formatSum(p.price)}{p.cost != null ? ` (tannarx ${formatSum(p.cost)})` : ""} · {p.stock === null || p.stock === undefined ? "zaxira cheksiz" : `${p.stock} dona`}{p.active ? "" : " · yashirin"}</div>
               </div>
               <div className="row-actions">
                 <button className="btn btn-small btn-ghost" onClick={() => open(p)}>Tahrir</button>
@@ -256,30 +270,6 @@ function Products({ onToast }) {
           ))}
         </ul>
       )}
-    </div>
-  );
-}
-
-export default function AdminPanel({ onClose, onToast }) {
-  const [tab, setTab] = useState("orders");
-  return (
-    <div className="admin-page" role="dialog" aria-modal="true" aria-label="Boshqaruv paneli">
-      <div className="admin-inner">
-        <div className="section-head">
-          <h2>Boshqaruv paneli</h2>
-          <button className="btn btn-small btn-ghost" onClick={onClose}>Yopish</button>
-        </div>
-        <div className="seg" role="tablist">
-          {[["orders", "Buyurtmalar"], ["products", "Tovarlar"], ["stats", "Statistika"]].map(([k, l]) => (
-            <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l}</button>
-          ))}
-        </div>
-        <div key={tab} className="admin-body">
-          {tab === "orders" && <Orders onToast={onToast} />}
-          {tab === "products" && <Products onToast={onToast} />}
-          {tab === "stats" && <Stats />}
-        </div>
-      </div>
     </div>
   );
 }

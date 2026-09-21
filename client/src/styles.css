@@ -78,7 +78,7 @@ a { color: var(--primary); }
   left: 0; right: 0; bottom: 0;
   z-index: 40;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(var(--n, 4), 1fr);
   height: calc(var(--nav-h) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   background: color-mix(in srgb, var(--surface) 92%, transparent);
@@ -179,7 +179,7 @@ input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--primary)
 .hero-label { font-size: 13px; opacity: 0.8; }
 .hero-value { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
 .hero-value.neg { color: #fecaca; }
-.hero-split { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.18); }
+.hero-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; margin-top: 10px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.18); }
 .hero-split b { display: block; font-size: 15px; }
 .hero-mini-label { display: block; font-size: 12px; opacity: 0.75; margin-bottom: 2px; }
 .pos-on-dark { color: #a7f3d0; }

@@ -11,8 +11,9 @@ Real tovarlar katalogidan (FakeStoreAPI) xarid qilish, sotish va shu bilan bog'l
 
 ## Imkoniyatlar
 
-- **Hisoblar**: email + parol, har bir foydalanuvchining ma'lumotlari alohida; ilova ichida hisobni o'chirish
-- **Do'kon**: tovarlarni qidirish/saralash/filtrlash, **savat** va buyurtma. To'lov (Payme) tasdiqlangach tovar **omborga** tushadi va **xarajat** sifatida yoziladi
+- **Ikki rol.** *Mijoz*: faqat Do'kon, Buyurtmalarim (holat chizig'i) va Profil. *Sotuvchi* (`ADMIN_EMAILS`): Umumiy (tushum, foyda, kutayotgan buyurtmalar), Buyurtmalar, Tovarlar (narx, tannarx, zaxira), Moliya (buyurtma tushumi va tannarxi avtomatik, boshqa xarajatlarni qo'lda qo'shish)
+- **Hisoblar**: email + parol; ilova ichida hisobni o'chirish (buyurtmalar hisob uchun saqlanadi, shaxsiy ma'lumotlar o'chiriladi)
+- **Do'kon**: tovarlarni qidirish/saralash/filtrlash, **savat** va buyurtma, to'lov Payme yoki Click orqali
 - **Buyurtmalarim**: holatlar (kutilmoqda / to'langan / bekor), qayta to'lash, bekor qilish
 - **Omborim**: hozir qo'lingizdagi (sotilmagan) tovarlar ro'yxati, har birini "Sotish" — bu avtomatik **daromad** sifatida yoziladi va foyda/zarar hisoblanadi
 - To'liq daromad/xarajat kuzatuvi: balans, davr bo'yicha kartalar (bugun/7 kun/shu oy/barchasi), qo'lda yozuv qo'shish
