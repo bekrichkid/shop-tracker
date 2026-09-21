@@ -4,6 +4,7 @@ import { formatSum, formatDate } from "../format.js";
 export default function InventoryList({ items, onSell, onDelete }) {
   const [selling, setSelling] = useState(null);
   const [price, setPrice] = useState("");
+  const [busy, setBusy] = useState(false);
 
   function startSell(item) {
     setSelling(item);
@@ -11,56 +12,71 @@ export default function InventoryList({ items, onSell, onDelete }) {
   }
 
   async function confirmSell() {
-    if (!price || Number(price) <= 0) return;
-    await onSell(selling.id, Number(price));
-    setSelling(null);
+    if (busy || !price || Number(price) <= 0) return;
+    setBusy(true);
+    try {
+      await onSell(selling.id, Number(price));
+      setSelling(null);
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (items.length === 0) {
-    return <div className="empty-state">Omboringiz bo'sh. "Do'kon" bo'limidan tovar sotib oling.</div>;
+    return (
+      <div className="empty-state">
+        <p>Omboringiz bo'sh.</p>
+        <p className="muted small">"Do'kon" bo'limidan tovar sotib oling.</p>
+      </div>
+    );
   }
+
+  const cost = selling ? selling.purchasePrice * selling.quantity : 0;
+  const profit = Number(price || 0) - cost;
 
   return (
     <>
-      <ul className="tx-list inventory-list">
+      <ul className="list-card">
         {items.map((item) => (
-          <li key={item.id} className="tx-item">
-            <img className="inv-thumb" src={item.image} alt={item.title} />
-            <div className="tx-main">
-              <div className="tx-top">
-                <span className="tx-category">{item.title}</span>
-                <span className="tx-amount expense">{formatSum(item.purchasePrice * item.quantity)}</span>
-              </div>
-              <div className="tx-bottom">
-                <span className="tx-date">{formatDate(item.purchasedAt)} · {item.quantity} dona</span>
-              </div>
+          <li key={item.id} className="row-item">
+            <img className="thumb" src={item.image} alt="" />
+            <div className="row-main">
+              <div className="row-title">{item.title}</div>
+              <div className="row-sub">{formatDate(item.purchasedAt)} · {item.quantity} dona · {formatSum(item.purchasePrice * item.quantity)}</div>
             </div>
-            <button className="link-btn small" onClick={() => startSell(item)}>Sotish</button>
-            <button className="tx-delete" title="Ombordan olib tashlash" onClick={() => onDelete(item.id)}>✕</button>
+            <div className="row-actions">
+              <button className="btn btn-small btn-primary" onClick={() => startSell(item)}>Sotish</button>
+              <button className="icon-btn" title="Ombordan olib tashlash" aria-label="Ombordan olib tashlash" onClick={() => onDelete(item.id)}>✕</button>
+            </div>
           </li>
         ))}
       </ul>
 
       {selling && (
-        <div className="modal-backdrop" onClick={() => setSelling(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
+        <div className="sheet-backdrop" onClick={() => setSelling(null)}>
+          <div className="sheet" role="dialog" aria-modal="true" aria-label="Sotish" onClick={(e) => e.stopPropagation()}>
+            <div className="sheet-grab" />
+            <div className="sheet-head">
               <h3>Sotish</h3>
-              <button className="link-btn" onClick={() => setSelling(null)}>Yopish</button>
+              <button className="icon-btn" onClick={() => setSelling(null)} aria-label="Yopish">✕</button>
             </div>
             <div className="buy-preview">
-              <img src={selling.image} alt={selling.title} />
+              <img src={selling.image} alt="" />
               <div className="buy-title">{selling.title}</div>
             </div>
-            <div className="modal-hint">Xarid narxi: {formatSum(selling.purchasePrice * selling.quantity)}</div>
-            <label className="field-label">Sotish narxi ($)</label>
-            <input type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} />
-            <div className="buy-total">
-              Foyda: <span className={Number(price) - selling.purchasePrice * selling.quantity >= 0 ? "insight-good" : "insight-bad"}>
-                {formatSum(Number(price || 0) - selling.purchasePrice * selling.quantity)}
-              </span>
+            <div className="muted small">Xarid narxi: {formatSum(cost)}</div>
+            <label className="field">
+              <span>Sotish narxi ($)</span>
+              <input type="number" inputMode="decimal" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} />
+            </label>
+            <div className="total-row">
+              <span>{profit >= 0 ? "Foyda" : "Zarar"}</span>
+              <b className={profit >= 0 ? "pos" : "neg"}>{formatSum(Math.abs(profit))}</b>
             </div>
-            <button className="submit-btn" onClick={confirmSell}>Tasdiqlash va daromad sifatida yozish</button>
+            <button className="btn btn-primary btn-block" onClick={confirmSell} disabled={busy}>
+              {busy ? "Iltimos kuting..." : "Tasdiqlash"}
+            </button>
+            <p className="muted small center">Daromad sifatida yoziladi.</p>
           </div>
         </div>
       )}

@@ -22,6 +22,12 @@ function ensureSchema() {
   if (!schemaReady) {
     schemaReady = (async () => {
       await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id TEXT PRIMARY KEY,
+          email TEXT NOT NULL UNIQUE,
+          password_hash TEXT NOT NULL,
+          created_at BIGINT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS categories (
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL,
@@ -60,18 +66,21 @@ function ensureSchema() {
           sold_price NUMERIC,
           sold_at TIMESTAMPTZ
         );
+        -- Multi-user: every row belongs to a user. Pre-existing rows have NULL user_id
+        -- and are claimed by the first account that registers.
+        ALTER TABLE categories ADD COLUMN IF NOT EXISTS user_id TEXT;
+        ALTER TABLE transactions ADD COLUMN IF NOT EXISTS user_id TEXT;
+        ALTER TABLE budgets ADD COLUMN IF NOT EXISTS user_id TEXT;
+        ALTER TABLE inventory ADD COLUMN IF NOT EXISTS user_id TEXT;
+        CREATE TABLE IF NOT EXISTS goals (
+          user_id TEXT PRIMARY KEY,
+          name TEXT,
+          target_amount NUMERIC
+        );
+        CREATE INDEX IF NOT EXISTS idx_tx_user ON transactions(user_id);
+        CREATE INDEX IF NOT EXISTS idx_inv_user ON inventory(user_id);
+        CREATE INDEX IF NOT EXISTS idx_cat_user ON categories(user_id);
       `);
-      const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM categories");
-      if (rows[0].n === 0) {
-        for (const c of DEFAULT_CATEGORIES) {
-          await pool.query("INSERT INTO categories (id, name, type, color) VALUES ($1,$2,$3,$4)", [
-            nanoid(8),
-            c.name,
-            c.type,
-            c.color,
-          ]);
-        }
-      }
     })();
   }
   return schemaReady;
@@ -110,122 +119,191 @@ function mapInventory(r) {
   };
 }
 
+async function seedCategories(userId) {
+  for (const c of DEFAULT_CATEGORIES) {
+    await pool.query("INSERT INTO categories (id, name, type, color, user_id) VALUES ($1,$2,$3,$4,$5)", [
+      nanoid(8),
+      c.name,
+      c.type,
+      c.color,
+      userId,
+    ]);
+  }
+}
+
 export const db = {
-  // Transactions
-  async listTransactions() {
+  // ---- Users ----
+  async findUserByEmail(email) {
     await ensureSchema();
-    const { rows } = await pool.query("SELECT * FROM transactions ORDER BY date DESC, created_at DESC");
+    const { rows } = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+    return rows[0] || null;
+  },
+  async findUserById(id) {
+    await ensureSchema();
+    const { rows } = await pool.query("SELECT * FROM users WHERE id = $1", [id]);
+    return rows[0] || null;
+  },
+  // Creates the user. The very first user also adopts any legacy (user_id IS NULL) data;
+  // otherwise the new user gets the default categories.
+  async createUser(email, passwordHash) {
+    await ensureSchema();
+    const id = nanoid(12);
+    const { rows: countRows } = await pool.query("SELECT COUNT(*)::int AS n FROM users");
+    const isFirst = countRows[0].n === 0;
+    await pool.query("INSERT INTO users (id, email, password_hash, created_at) VALUES ($1,$2,$3,$4)", [
+      id,
+      email,
+      passwordHash,
+      Date.now(),
+    ]);
+    let adopted = false;
+    if (isFirst) {
+      const { rowCount } = await pool.query("UPDATE categories SET user_id = $1 WHERE user_id IS NULL", [id]);
+      adopted = rowCount > 0;
+      await pool.query("UPDATE transactions SET user_id = $1 WHERE user_id IS NULL", [id]);
+      await pool.query("UPDATE budgets SET user_id = $1 WHERE user_id IS NULL", [id]);
+      await pool.query("UPDATE inventory SET user_id = $1 WHERE user_id IS NULL", [id]);
+      await pool.query(
+        `INSERT INTO goals (user_id, name, target_amount)
+         SELECT $1, name, target_amount FROM goal WHERE id = 1 AND target_amount IS NOT NULL
+         ON CONFLICT (user_id) DO NOTHING`,
+        [id]
+      );
+    }
+    if (!adopted) await seedCategories(id);
+    return { id, email };
+  },
+  async deleteUserAndData(userId) {
+    await ensureSchema();
+    await pool.query("DELETE FROM budgets WHERE user_id = $1", [userId]);
+    await pool.query("DELETE FROM transactions WHERE user_id = $1", [userId]);
+    await pool.query("DELETE FROM inventory WHERE user_id = $1", [userId]);
+    await pool.query("DELETE FROM categories WHERE user_id = $1", [userId]);
+    await pool.query("DELETE FROM goals WHERE user_id = $1", [userId]);
+    await pool.query("DELETE FROM users WHERE id = $1", [userId]);
+  },
+
+  // ---- Transactions ----
+  async listTransactions(userId) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      "SELECT * FROM transactions WHERE user_id = $1 ORDER BY date DESC, created_at DESC",
+      [userId]
+    );
     return rows.map(mapTransaction);
   },
-  async addTransaction(tx) {
+  async addTransaction(userId, tx) {
     await ensureSchema();
     const id = nanoid(10);
     const { rows } = await pool.query(
-      `INSERT INTO transactions (id, type, amount, category, note, date, created_at, inventory_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [id, tx.type, Number(tx.amount), tx.category, tx.note || "", tx.date, Date.now(), tx.inventoryId || null]
+      `INSERT INTO transactions (id, type, amount, category, note, date, created_at, inventory_id, user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [id, tx.type, Number(tx.amount), tx.category, tx.note || "", tx.date, Date.now(), tx.inventoryId || null, userId]
     );
     return mapTransaction(rows[0]);
   },
-  async deleteTransaction(id) {
+  async deleteTransaction(userId, id) {
     await ensureSchema();
-    const { rowCount } = await pool.query("DELETE FROM transactions WHERE id = $1", [id]);
+    const { rowCount } = await pool.query("DELETE FROM transactions WHERE id = $1 AND user_id = $2", [id, userId]);
     return rowCount > 0;
   },
 
-  // Categories
-  async listCategories() {
+  // ---- Categories ----
+  async listCategories(userId) {
     await ensureSchema();
-    const { rows } = await pool.query("SELECT * FROM categories ORDER BY type, name");
+    const { rows } = await pool.query("SELECT * FROM categories WHERE user_id = $1 ORDER BY type, name", [userId]);
     return rows.map(mapCategory);
   },
-  async addCategory(cat) {
+  async addCategory(userId, cat) {
     await ensureSchema();
     const id = nanoid(8);
     const { rows } = await pool.query(
-      "INSERT INTO categories (id, name, type, color) VALUES ($1,$2,$3,$4) RETURNING *",
-      [id, cat.name, cat.type, cat.color || "#777777"]
+      "INSERT INTO categories (id, name, type, color, user_id) VALUES ($1,$2,$3,$4,$5) RETURNING *",
+      [id, cat.name, cat.type, cat.color || "#777777", userId]
     );
     return mapCategory(rows[0]);
   },
-  async deleteCategory(id) {
+  async deleteCategory(userId, id) {
     await ensureSchema();
-    const { rowCount } = await pool.query("DELETE FROM categories WHERE id = $1", [id]);
+    const { rowCount } = await pool.query("DELETE FROM categories WHERE id = $1 AND user_id = $2", [id, userId]);
     return rowCount > 0;
   },
 
-  // Budgets
-  async getBudgets() {
+  // ---- Budgets ----
+  async getBudgets(userId) {
     await ensureSchema();
-    const { rows } = await pool.query("SELECT * FROM budgets");
+    const { rows } = await pool.query("SELECT * FROM budgets WHERE user_id = $1", [userId]);
     return Object.fromEntries(rows.map((r) => [r.category_id, Number(r.limit_amount)]));
   },
-  async setBudget(categoryId, limit) {
+  async setBudget(userId, categoryId, limit) {
     await ensureSchema();
     if (limit === null || limit === undefined || limit === "") {
-      await pool.query("DELETE FROM budgets WHERE category_id = $1", [categoryId]);
+      await pool.query("DELETE FROM budgets WHERE category_id = $1 AND user_id = $2", [categoryId, userId]);
     } else {
+      // Only allow limits on categories the user owns.
+      const { rowCount } = await pool.query("SELECT 1 FROM categories WHERE id = $1 AND user_id = $2", [categoryId, userId]);
+      if (rowCount === 0) return db.getBudgets(userId);
       await pool.query(
-        `INSERT INTO budgets (category_id, limit_amount) VALUES ($1,$2)
+        `INSERT INTO budgets (category_id, limit_amount, user_id) VALUES ($1,$2,$3)
          ON CONFLICT (category_id) DO UPDATE SET limit_amount = $2`,
-        [categoryId, Number(limit)]
+        [categoryId, Number(limit), userId]
       );
     }
-    return db.getBudgets();
+    return db.getBudgets(userId);
   },
 
-  // Savings goal
-  async getGoal() {
+  // ---- Savings goal ----
+  async getGoal(userId) {
     await ensureSchema();
-    const { rows } = await pool.query("SELECT * FROM goal WHERE id = 1");
+    const { rows } = await pool.query("SELECT * FROM goals WHERE user_id = $1", [userId]);
     if (rows.length === 0 || !rows[0].target_amount) return {};
     return { name: rows[0].name || "Oylik jamg'arma", targetAmount: Number(rows[0].target_amount) };
   },
-  async setGoal(goal) {
+  async setGoal(userId, goal) {
     await ensureSchema();
     if (!goal || !goal.targetAmount) {
-      await pool.query("DELETE FROM goal WHERE id = 1");
+      await pool.query("DELETE FROM goals WHERE user_id = $1", [userId]);
       return {};
     }
     const name = goal.name || "Oylik jamg'arma";
     await pool.query(
-      `INSERT INTO goal (id, name, target_amount) VALUES (1, $1, $2)
-       ON CONFLICT (id) DO UPDATE SET name = $1, target_amount = $2`,
-      [name, Number(goal.targetAmount)]
+      `INSERT INTO goals (user_id, name, target_amount) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id) DO UPDATE SET name = $2, target_amount = $3`,
+      [userId, name, Number(goal.targetAmount)]
     );
     return { name, targetAmount: Number(goal.targetAmount) };
   },
 
-  // Inventory (bought products, holding or sold)
-  async listInventory(status) {
+  // ---- Inventory ----
+  async listInventory(userId, status) {
     await ensureSchema();
     const { rows } = status
-      ? await pool.query("SELECT * FROM inventory WHERE status = $1 ORDER BY purchased_at DESC", [status])
-      : await pool.query("SELECT * FROM inventory ORDER BY purchased_at DESC");
+      ? await pool.query("SELECT * FROM inventory WHERE user_id = $1 AND status = $2 ORDER BY purchased_at DESC", [userId, status])
+      : await pool.query("SELECT * FROM inventory WHERE user_id = $1 ORDER BY purchased_at DESC", [userId]);
     return rows.map(mapInventory);
   },
-  async addInventory(item) {
+  async addInventory(userId, item) {
     await ensureSchema();
     const id = nanoid(10);
     const { rows } = await pool.query(
-      `INSERT INTO inventory (id, product_id, title, image, category, quantity, purchase_price, purchased_at, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'holding') RETURNING *`,
-      [id, item.productId, item.title, item.image, item.category, item.quantity, item.purchasePrice, item.purchasedAt]
+      `INSERT INTO inventory (id, product_id, title, image, category, quantity, purchase_price, purchased_at, status, user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'holding',$9) RETURNING *`,
+      [id, item.productId, item.title, item.image, item.category, item.quantity, item.purchasePrice, item.purchasedAt, userId]
     );
     return mapInventory(rows[0]);
   },
-  async sellInventory(id, salePrice, soldAt) {
+  async sellInventory(userId, id, salePrice, soldAt) {
     await ensureSchema();
     const { rows } = await pool.query(
-      `UPDATE inventory SET status = 'sold', sold_price = $2, sold_at = $3
-       WHERE id = $1 AND status = 'holding' RETURNING *`,
-      [id, salePrice, soldAt]
+      `UPDATE inventory SET status = 'sold', sold_price = $3, sold_at = $4
+       WHERE id = $1 AND user_id = $2 AND status = 'holding' RETURNING *`,
+      [id, userId, salePrice, soldAt]
     );
     return rows[0] ? mapInventory(rows[0]) : null;
   },
-  async deleteInventory(id) {
+  async deleteInventory(userId, id) {
     await ensureSchema();
-    const { rowCount } = await pool.query("DELETE FROM inventory WHERE id = $1", [id]);
+    const { rowCount } = await pool.query("DELETE FROM inventory WHERE id = $1 AND user_id = $2", [id, userId]);
     return rowCount > 0;
   },
 };

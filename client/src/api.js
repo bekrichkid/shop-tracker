@@ -6,11 +6,43 @@ const BASE = `${API_BASE}/api`;
 // requests from real browsers.
 const PRODUCTS_API = "https://fakestoreapi.com";
 
+const TOKEN_KEY = "shop_token";
+let unauthorizedHandler = () => {};
+
+export const auth = {
+  getToken: () => {
+    try {
+      return localStorage.getItem(TOKEN_KEY);
+    } catch {
+      return null;
+    }
+  },
+  setToken: (t) => {
+    try {
+      if (t) localStorage.setItem(TOKEN_KEY, t);
+      else localStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+  },
+  onUnauthorized: (fn) => {
+    unauthorizedHandler = fn;
+  },
+};
+
 async function request(path, options = {}) {
+  const token = auth.getToken();
   const res = await fetch(BASE + path, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
   });
+  if (res.status === 401 && !path.startsWith("/auth/login") && !path.startsWith("/auth/register")) {
+    unauthorizedHandler();
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `So'rov xato: ${res.status}`);
@@ -26,6 +58,21 @@ async function fetchProducts(url) {
 }
 
 export const api = {
+  register: (email, password) => request("/auth/register", { method: "POST", body: JSON.stringify({ email, password }) }),
+  login: (email, password) => request("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+  me: () => request("/auth/me"),
+  deleteAccount: () => request("/auth/account", { method: "DELETE" }),
+  // CSV needs the auth header, so it is fetched and saved as a file instead of window.open.
+  downloadCsv: async () => {
+    const csv = await request("/export/csv");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "tranzaksiyalar.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
   getProducts: (category) =>
     fetchProducts(category ? `${PRODUCTS_API}/products/category/${encodeURIComponent(category)}` : `${PRODUCTS_API}/products`),
   getProductCategories: () => fetchProducts(`${PRODUCTS_API}/products/categories`),

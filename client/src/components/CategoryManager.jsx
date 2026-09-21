@@ -37,11 +37,12 @@ export default function CategoryManager({ categories, budgets, monthTransactions
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet" role="dialog" aria-modal="true" aria-label="Kategoriyalar" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-grab" />
+        <div className="sheet-head">
           <h3>Kategoriyalar va oylik limit</h3>
-          <button className="link-btn" onClick={onClose}>Yopish</button>
+          <button className="icon-btn" onClick={onClose} aria-label="Yopish">✕</button>
         </div>
 
         <div className="new-cat-form">

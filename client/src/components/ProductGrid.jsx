@@ -1,30 +1,48 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api.js";
 import { formatSum } from "../format.js";
 
+const SORTS = [
+  { key: "default", label: "Odatiy" },
+  { key: "price-asc", label: "Arzonroq" },
+  { key: "price-desc", label: "Qimmatroq" },
+  { key: "rating", label: "Reyting bo'yicha" },
+];
+
 export default function ProductGrid({ onBuy }) {
   const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [category, setCategory] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [buying, setBuying] = useState(null); // product being bought
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("");
+  const [sort, setSort] = useState("default");
+  const [buying, setBuying] = useState(null);
   const [quantity, setQuantity] = useState(1);
   const [price, setPrice] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    api.getProductCategories().then(setCategories).catch(() => {});
-  }, []);
-
-  useEffect(() => {
+  function load() {
     setLoading(true);
     setError("");
     api
-      .getProducts(category)
+      .getProducts()
       .then(setProducts)
-      .catch(() => setError("Tovarlarni yuklab bo'lmadi. Birozdan keyin urinib ko'ring."))
+      .catch(() => setError("Tovarlarni yuklab bo'lmadi. Internetni tekshirib, qayta urinib ko'ring."))
       .finally(() => setLoading(false));
-  }, [category]);
+  }
+
+  useEffect(load, []);
+
+  const categories = useMemo(() => [...new Set(products.map((p) => p.category))], [products]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    let list = products.filter((p) => (!category || p.category === category) && (!q || p.title.toLowerCase().includes(q)));
+    if (sort === "price-asc") list = [...list].sort((a, b) => a.price - b.price);
+    else if (sort === "price-desc") list = [...list].sort((a, b) => b.price - a.price);
+    else if (sort === "rating") list = [...list].sort((a, b) => (b.rating?.rate || 0) - (a.rating?.rate || 0));
+    return list;
+  }, [products, query, category, sort]);
 
   function startBuy(product) {
     setBuying(product);
@@ -33,67 +51,108 @@ export default function ProductGrid({ onBuy }) {
   }
 
   async function confirmBuy() {
-    if (!price || Number(price) <= 0) return;
-    await onBuy({
-      productId: buying.id,
-      title: buying.title,
-      image: buying.image,
-      category: buying.category,
-      quantity: Number(quantity) || 1,
-      purchasePrice: Number(price),
-    });
-    setBuying(null);
+    if (busy || !price || Number(price) <= 0) return;
+    setBusy(true);
+    try {
+      await onBuy({
+        productId: buying.id,
+        title: buying.title,
+        image: buying.image,
+        category: buying.category,
+        quantity: Number(quantity) || 1,
+        purchasePrice: Number(price),
+      });
+      setBuying(null);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <section>
-      <div className="shop-toolbar">
-        <select value={category} onChange={(e) => setCategory(e.target.value)}>
-          <option value="">Barcha kategoriyalar</option>
-          {categories.map((c) => (
-            <option key={c} value={c}>{c}</option>
+      <div className="search-bar">
+        <input type="search" placeholder="Tovar qidirish..." value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Tovar qidirish" />
+        <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Saralash">
+          {SORTS.map((s) => (
+            <option key={s.key} value={s.key}>{s.label}</option>
           ))}
         </select>
       </div>
 
-      {loading && <div className="empty-state">Yuklanmoqda...</div>}
-      {error && <div className="empty-state">{error}</div>}
+      <div className="chip-row" role="tablist" aria-label="Kategoriyalar">
+        <button className={"chip" + (!category ? " chip-active" : "")} onClick={() => setCategory("")}>Hammasi</button>
+        {categories.map((c) => (
+          <button key={c} className={"chip" + (category === c ? " chip-active" : "")} onClick={() => setCategory(c)}>
+            {c}
+          </button>
+        ))}
+      </div>
 
-      {!loading && !error && (
+      {loading && (
         <div className="product-grid">
-          {products.map((p) => (
-            <div key={p.id} className="product-card">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="product-card skeleton" />
+          ))}
+        </div>
+      )}
+
+      {error && (
+        <div className="empty-state">
+          <p>{error}</p>
+          <button className="btn btn-primary" onClick={load}>Qayta urinish</button>
+        </div>
+      )}
+
+      {!loading && !error && visible.length === 0 && <div className="empty-state">Hech narsa topilmadi.</div>}
+
+      {!loading && !error && visible.length > 0 && (
+        <div className="product-grid">
+          {visible.map((p) => (
+            <article key={p.id} className="product-card">
               <div className="product-image-wrap">
                 <img src={p.image} alt={p.title} loading="lazy" />
               </div>
-              <div className="product-title" title={p.title}>{p.title}</div>
+              <h3 className="product-title" title={p.title}>{p.title}</h3>
               <div className="product-meta">
                 <span className="product-price">{formatSum(p.price)}</span>
                 {p.rating && <span className="product-rating">★ {p.rating.rate}</span>}
               </div>
-              <button className="submit-btn small" onClick={() => startBuy(p)}>Sotib olish</button>
-            </div>
+              <button className="btn btn-primary btn-block" onClick={() => startBuy(p)}>Sotib olish</button>
+            </article>
           ))}
         </div>
       )}
 
       {buying && (
-        <div className="modal-backdrop" onClick={() => setBuying(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
+        <div className="sheet-backdrop" onClick={() => setBuying(null)}>
+          <div className="sheet" role="dialog" aria-modal="true" aria-label="Sotib olish" onClick={(e) => e.stopPropagation()}>
+            <div className="sheet-grab" />
+            <div className="sheet-head">
               <h3>Sotib olish</h3>
-              <button className="link-btn" onClick={() => setBuying(null)}>Yopish</button>
+              <button className="icon-btn" onClick={() => setBuying(null)} aria-label="Yopish">✕</button>
             </div>
             <div className="buy-preview">
-              <img src={buying.image} alt={buying.title} />
+              <img src={buying.image} alt="" />
               <div className="buy-title">{buying.title}</div>
             </div>
-            <label className="field-label">Miqdori</label>
-            <input type="number" min="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
-            <label className="field-label">Dona narxi ($)</label>
-            <input type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} />
-            <div className="buy-total">Jami: {formatSum(Number(price || 0) * Number(quantity || 0))}</div>
-            <button className="submit-btn" onClick={confirmBuy}>Tasdiqlash va xarajat sifatida yozish</button>
+            <div className="form-row">
+              <label className="field">
+                <span>Miqdori</span>
+                <input type="number" inputMode="numeric" min="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+              </label>
+              <label className="field">
+                <span>Dona narxi ($)</span>
+                <input type="number" inputMode="decimal" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} />
+              </label>
+            </div>
+            <div className="total-row">
+              <span>Jami</span>
+              <b>{formatSum(Number(price || 0) * Number(quantity || 0))}</b>
+            </div>
+            <button className="btn btn-primary btn-block" onClick={confirmBuy} disabled={busy}>
+              {busy ? "Iltimos kuting..." : "Tasdiqlash"}
+            </button>
+            <p className="muted small center">Xarajat sifatida yoziladi va tovar omboringizga qo'shiladi.</p>
           </div>
         </div>
       )}

@@ -42,7 +42,6 @@ export default function TransactionForm({ categories, onSubmit }) {
 
   return (
     <form className="tx-form" onSubmit={handleSubmit}>
-      <h3 className="form-title">Qo'lda yozuv qo'shish</h3>
       <div className="type-toggle">
         <button
           type="button"
@@ -63,6 +62,7 @@ export default function TransactionForm({ categories, onSubmit }) {
       <div className="form-row">
         <input
           type="number"
+          inputMode="decimal"
           min="0"
           step="0.01"
           placeholder="Summa ($)"
@@ -87,7 +87,7 @@ export default function TransactionForm({ categories, onSubmit }) {
 
       {error && <div className="form-error">{error}</div>}
 
-      <button type="submit" className="submit-btn" disabled={submitting}>
+      <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
         {submitting ? "Saqlanmoqda..." : "Saqlash"}
       </button>
     </form>

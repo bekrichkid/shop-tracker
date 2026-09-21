@@ -7,34 +7,35 @@ const PERIODS = [
   { key: "all", label: "Barchasi" },
 ];
 
-export default function SummaryCards({ period, onPeriodChange, income, expense, synced }) {
+export default function SummaryCards({ period, onPeriodChange, income, expense, inventoryValue, synced }) {
   const balance = income - expense;
   return (
     <section className="summary">
-      <div className="period-switch">
+      <div className="chip-row" role="tablist" aria-label="Davr">
         {PERIODS.map((p) => (
-          <button
-            key={p.key}
-            className={"chip" + (period === p.key ? " chip-active" : "")}
-            onClick={() => onPeriodChange(p.key)}
-          >
+          <button key={p.key} className={"chip" + (period === p.key ? " chip-active" : "")} onClick={() => onPeriodChange(p.key)}>
             {p.label}
           </button>
         ))}
-        <span className={"live-dot" + (synced ? " live-on" : "")} title={synced ? "Sinxronlangan" : "Aloqa yo'q"} />
+        <span className={"sync-dot" + (synced ? " on" : "")} title={synced ? "Sinxronlangan" : "Aloqa yo'q"} />
       </div>
-      <div className="cards">
-        <div className="card card-balance">
-          <span className="card-label">Balans</span>
-          <span className={"card-value" + (balance < 0 ? " negative" : "")}>{formatSum(balance)}</span>
-        </div>
-        <div className="card card-income">
-          <span className="card-label">Daromad</span>
-          <span className="card-value">{formatSum(income)}</span>
-        </div>
-        <div className="card card-expense">
-          <span className="card-label">Xarajat</span>
-          <span className="card-value">{formatSum(expense)}</span>
+
+      <div className="hero">
+        <span className="hero-label">Balans</span>
+        <span className={"hero-value" + (balance < 0 ? " neg" : "")}>{formatSum(balance)}</span>
+        <div className="hero-split">
+          <div>
+            <span className="hero-mini-label">Daromad</span>
+            <b className="pos-on-dark">{formatSum(income)}</b>
+          </div>
+          <div>
+            <span className="hero-mini-label">Xarajat</span>
+            <b className="neg-on-dark">{formatSum(expense)}</b>
+          </div>
+          <div>
+            <span className="hero-mini-label">Omborda</span>
+            <b>{formatSum(inventoryValue)}</b>
+          </div>
         </div>
       </div>
     </section>

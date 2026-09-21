@@ -1,4 +1,4 @@
-export default function Filters({ categories, filters, onChange, onExport }) {
+export default function Filters({ categories, filters, onChange }) {
   function update(patch) {
     onChange({ ...filters, ...patch });
   }
@@ -23,7 +23,6 @@ export default function Filters({ categories, filters, onChange, onExport }) {
         value={filters.q}
         onChange={(e) => update({ q: e.target.value })}
       />
-      <button type="button" className="link-btn" onClick={onExport}>CSV yuklash</button>
     </div>
   );
 }

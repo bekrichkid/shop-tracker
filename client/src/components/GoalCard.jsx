@@ -38,7 +38,7 @@ export default function GoalCard({ goal, monthIncome, monthExpense, onSetGoal })
         <div className="goal-edit-actions">
           <button className="link-btn" onClick={() => setEditing(false)}>Bekor qilish</button>
           {hasGoal && <button className="link-btn danger" onClick={clear}>O'chirish</button>}
-          <button className="submit-btn small" onClick={save}>Saqlash</button>
+          <button className="btn btn-small btn-primary" onClick={save}>Saqlash</button>
         </div>
       </div>
     );
