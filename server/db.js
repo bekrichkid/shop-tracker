@@ -131,6 +131,15 @@ function ensureSchema() {
         ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment TEXT NOT NULL DEFAULT 'new';
         ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment_at BIGINT;
         ALTER TABLE orders ADD COLUMN IF NOT EXISTS admin_note TEXT;
+        CREATE TABLE IF NOT EXISTS click_transactions (
+          click_trans_id TEXT PRIMARY KEY,
+          prepare_id TEXT NOT NULL UNIQUE,
+          order_id TEXT NOT NULL,
+          amount NUMERIC NOT NULL,
+          state TEXT NOT NULL,
+          created_at BIGINT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_click_order ON click_transactions(order_id);
         CREATE INDEX IF NOT EXISTS idx_pay_order ON payment_transactions(order_id);
         CREATE INDEX IF NOT EXISTS idx_tx_user ON transactions(user_id);
         CREATE INDEX IF NOT EXISTS idx_inv_user ON inventory(user_id);
@@ -518,7 +527,8 @@ export const db = {
     await ensureSchema();
     const { rowCount } = await pool.query(
       `UPDATE orders SET status = 'cancelled' WHERE id = $1 AND user_id = $2 AND status = 'pending'
-       AND NOT EXISTS (SELECT 1 FROM payment_transactions p WHERE p.order_id = $1 AND p.state IN (1, 2))`,
+       AND NOT EXISTS (SELECT 1 FROM payment_transactions p WHERE p.order_id = $1 AND p.state IN (1, 2))
+       AND NOT EXISTS (SELECT 1 FROM click_transactions c WHERE c.order_id = $1 AND c.state = 'prepared')`,
       [id, userId]
     );
     return rowCount > 0;
@@ -657,6 +667,26 @@ export const db = {
       customers: cust[0].n,
       lowStock: low,
     };
+  },
+
+  // ---- Click transactions ----
+  async getClickTx(clickTransId) {
+    await ensureSchema();
+    const { rows } = await pool.query("SELECT * FROM click_transactions WHERE click_trans_id = $1", [String(clickTransId)]);
+    return rows[0] || null;
+  },
+  async createClickTx({ clickTransId, orderId, amount }) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `INSERT INTO click_transactions (click_trans_id, prepare_id, order_id, amount, state, created_at)
+       VALUES ($1,$2,$3,$4,'prepared',$5) RETURNING *`,
+      [String(clickTransId), nanoid(12), orderId, amount, Date.now()]
+    );
+    return rows[0];
+  },
+  async setClickTxState(clickTransId, state) {
+    await ensureSchema();
+    await pool.query("UPDATE click_transactions SET state = $2 WHERE click_trans_id = $1", [String(clickTransId), state]);
   },
 
   async getPayment(id) {

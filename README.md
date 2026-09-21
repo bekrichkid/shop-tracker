@@ -29,6 +29,11 @@ Netlify muhit o'zgaruvchilari: `PAYME_MERCHANT_ID`, `PAYME_KEY`, `APP_URL`, ixti
 Kalitlar qo'yilmaguncha **Demo** to'lov ishlaydi (haqiqiy pul yechilmaydi); kalitlar qo'yilgach u avtomatik o'chadi.
 Merchant API to'liq qo'llab-quvvatlanadi: CheckPerform/Create/Perform/Cancel/CheckTransaction/GetStatement.
 
+### Click
+
+Callback (Prepare va Complete uchun **bir xil** manzil): `https://<sayt>/api/click`.
+Netlify env: `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_SECRET_KEY`. Imzo (md5) tekshiriladi, summa so'mda, takroriy so'rovlar xavfsiz (bir buyurtma ikki marta yozilmaydi).
+
 ## Katalog
 
 Tovarlar Postgres'dagi `products` jadvalida (birinchi ishga tushishda `server/catalog.json`'dan to'ldiriladi, rasmlar `client/public/products/`). `GET /api/products` ochiq. Buyurtmada narx va nom **faqat serverdagi katalogdan** olinadi, mijoz yuborgan narxga ishonilmaydi.

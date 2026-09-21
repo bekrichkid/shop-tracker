@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api } from "../api.js";
 import { formatSum, formatUzs } from "../format.js";
 
-const PROVIDER_LABEL = { payme: "Payme", demo: "Demo to'lov (sinov)" };
+const PROVIDER_LABEL = { payme: "Payme", click: "Click", demo: "Demo to'lov (sinov)" };
 
 export default function CartSheet({ cart, providers, rate, onChangeQty, onRemove, onClose, onPaid, savedContact }) {
   const [fullName, setFullName] = useState(savedContact?.fullName || "");

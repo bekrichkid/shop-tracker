@@ -5,13 +5,15 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { db } from "./db.js";
 import { paymeHandler } from "./payme.js";
+import { clickHandler } from "./click.js";
 import { notifyOrderPaid } from "./notify.js";
-import { paymentConfig, paymeCheckoutUrl } from "./payments.js";
+import { paymentConfig, paymeCheckoutUrl, clickCheckoutUrl } from "./payments.js";
 
 export const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: false })); // Click posts form-encoded bodies
 
 // JWT_SECRET should be set in production; otherwise derive a stable secret from DATABASE_URL
 // so deploys work without an extra manual step.
@@ -116,6 +118,7 @@ app.delete("/api/auth/account", requireAuth, async (req, res, next) => {
 
 // Payment provider callback: authenticated by the provider's own Basic credentials, not a user JWT.
 app.post("/api/payme", paymeHandler);
+app.post("/api/click", clickHandler);
 
 // Public shop contact details (set in env) for the support screen.
 app.get("/api/store", (req, res) => {
@@ -142,8 +145,8 @@ app.use("/api", requireAuth);
 
 // ---- Payments & orders ----
 app.get("/api/payments/config", (req, res) => {
-  const { payme, demo, rate } = paymentConfig();
-  res.json({ providers: [...(payme ? ["payme"] : []), ...(demo ? ["demo"] : [])], rate });
+  const { payme, click, demo, rate } = paymentConfig();
+  res.json({ providers: [...(payme ? ["payme"] : []), ...(click ? ["click"] : []), ...(demo ? ["demo"] : [])], rate });
 });
 
 const PHONE_RE = /^\+?[0-9\s()-]{9,18}$/;
@@ -322,13 +325,18 @@ app.post("/api/orders/:id/pay", async (req, res, next) => {
     const order = await db.getOrder(req.params.id, req.userId);
     if (!order) return res.status(404).json({ error: "Buyurtma topilmadi" });
     if (order.status !== "pending") return res.status(409).json({ error: "Buyurtma allaqachon to'langan yoki bekor qilingan" });
-    const { payme, demo } = paymentConfig();
+    const { payme, click, demo } = paymentConfig();
     const provider = req.body.provider;
 
     if (provider === "payme" && payme) {
       const returnUrl = process.env.APP_URL || req.headers.origin || "";
       const base = returnUrl ? `${returnUrl.replace(/\/$/, "")}/?order=${order.id}` : "";
       return res.json({ payUrl: paymeCheckoutUrl(order, base) });
+    }
+    if (provider === "click" && click) {
+      const returnUrl = process.env.APP_URL || req.headers.origin || "";
+      const base = returnUrl ? `${returnUrl.replace(/\/$/, "")}/?order=${order.id}` : "";
+      return res.json({ payUrl: clickCheckoutUrl(order, base) });
     }
     if (provider === "demo" && demo) {
       if (await db.markOrderPaid(order.id, "demo", null)) await notifyOrderPaid(order.id);
