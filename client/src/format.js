@@ -1,6 +1,8 @@
+import { tr } from "./i18n.jsx";
+
+// All money in the app is in so'm.
 export function formatSum(n) {
-  const num = Number(n) || 0;
-  return new Intl.NumberFormat("uz-UZ", { maximumFractionDigits: 2 }).format(num) + " $";
+  return new Intl.NumberFormat("uz-UZ", { maximumFractionDigits: 0 }).format(Number(n) || 0) + " " + tr("so'm");
 }
 
 export function formatDate(d) {
@@ -9,5 +11,5 @@ export function formatDate(d) {
 }
 
 export function formatUzs(n) {
-  return new Intl.NumberFormat("uz-UZ", { maximumFractionDigits: 0 }).format(Number(n) || 0) + " so'm";
+  return new Intl.NumberFormat("uz-UZ", { maximumFractionDigits: 0 }).format(Number(n) || 0) + " " + tr("so'm");
 }

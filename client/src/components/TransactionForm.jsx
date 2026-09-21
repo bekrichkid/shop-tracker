@@ -64,8 +64,8 @@ export default function TransactionForm({ categories, onSubmit }) {
           type="number"
           inputMode="decimal"
           min="0"
-          step="0.01"
-          placeholder="Summa ($)"
+          step="1000"
+          placeholder="Summa (so'm)"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
         />

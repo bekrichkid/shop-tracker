@@ -35,6 +35,15 @@ Merchant API to'liq qo'llab-quvvatlanadi: CheckPerform/Create/Perform/Cancel/Che
 Callback (Prepare va Complete uchun **bir xil** manzil): `https://<sayt>/api/click`.
 Netlify env: `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_SECRET_KEY`. Imzo (md5) tekshiriladi, summa so'mda, takroriy so'rovlar xavfsiz (bir buyurtma ikki marta yozilmaydi).
 
+## Qo'shimcha imkoniyatlar
+
+- **Narxlar so'mda.** Tovar narxi va tannarxini admin panelda so'mda kiritasiz. Rasmni telefondan yuklaysiz (avtomatik kichraytiriladi).
+- **Promokodlar** (foiz yoki summa, minimal buyurtma, limit, muddat) va **yetkazib berish narxi** (ma'lum summadan yuqorida bepul) — Profil → sozlamalar. Savat narxni serverdan hisoblaydi.
+- **Sharhlar:** faqat yetkazib berilgan tovarni baholash mumkin. **Sevimlilar**, 3 tagacha saqlangan manzil, **rus tili**.
+- **Parolni tiklash:** email orqali (`RESEND_API_KEY`, `MAIL_FROM`); email yoqilmagan bo'lsa sotuvchi mijozga vaqtinchalik parol beradi (Umumiy → Mijozlar). Kirishga urinishlar cheklangan (rate limit).
+- Buyurtma holati o'zgarganda mijozga email, zaxira kam qolsa Telegram xabari; buyurtmalarni CSV qilib yuklash.
+- Oferta, qaytarish va maxfiylik sahifalari `client/public/` ichida — **qavs ichidagi sariq joylarni o'z ma'lumotingiz bilan to'ldiring**.
+
 ## Katalog
 
 Tovarlar Postgres'dagi `products` jadvalida (birinchi ishga tushishda `server/catalog.json`'dan to'ldiriladi, rasmlar `client/public/products/`). `GET /api/products` ochiq. Buyurtmada narx va nom **faqat serverdagi katalogdan** olinadi, mijoz yuborgan narxga ishonilmaydi.

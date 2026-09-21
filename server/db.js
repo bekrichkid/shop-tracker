@@ -129,6 +129,19 @@ function ensureSchema() {
         );
         ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INT;
         ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_usd NUMERIC;
+        -- Prices are in so'm (integer). The old USD columns stay for history but are no longer required.
+        ALTER TABLE products ADD COLUMN IF NOT EXISTS price_uzs BIGINT;
+        ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_uzs BIGINT;
+        ALTER TABLE products ALTER COLUMN price_usd DROP NOT NULL;
+        ALTER TABLE products DROP CONSTRAINT IF EXISTS products_price_usd_check;
+        ALTER TABLE order_items ADD COLUMN IF NOT EXISTS unit_price_uzs BIGINT;
+        ALTER TABLE order_items ADD COLUMN IF NOT EXISTS unit_cost_uzs BIGINT;
+        UPDATE products SET price_uzs = ROUND(price_usd * 12500 / 1000) * 1000 WHERE price_uzs IS NULL AND price_usd IS NOT NULL;
+        UPDATE products SET cost_uzs = ROUND(cost_usd * 12500 / 1000) * 1000 WHERE cost_uzs IS NULL AND cost_usd IS NOT NULL;
+        UPDATE order_items i SET unit_price_uzs = ROUND(i.unit_price_usd * o.rate)
+          FROM orders o WHERE o.id = i.order_id AND i.unit_price_uzs IS NULL;
+        UPDATE order_items i SET unit_cost_uzs = ROUND(i.unit_cost_usd * o.rate)
+          FROM orders o WHERE o.id = i.order_id AND i.unit_cost_uzs IS NULL AND i.unit_cost_usd IS NOT NULL;
         ALTER TABLE order_items ADD COLUMN IF NOT EXISTS unit_cost_usd NUMERIC;
         ALTER TABLE transactions ADD COLUMN IF NOT EXISTS order_id TEXT;
         CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_order_type ON transactions(user_id, order_id, type) WHERE order_id IS NOT NULL;
@@ -143,6 +156,45 @@ function ensureSchema() {
           state TEXT NOT NULL,
           created_at BIGINT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS product_images (
+          product_id INT PRIMARY KEY,
+          mime TEXT NOT NULL,
+          data BYTEA NOT NULL,
+          updated_at BIGINT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS promos (
+          code TEXT PRIMARY KEY,
+          kind TEXT NOT NULL CHECK (kind IN ('percent','amount')),
+          value BIGINT NOT NULL,
+          min_total BIGINT NOT NULL DEFAULT 0,
+          max_uses INT,
+          used INT NOT NULL DEFAULT 0,
+          expires_at BIGINT,
+          active BOOLEAN NOT NULL DEFAULT TRUE
+        );
+        ALTER TABLE orders ADD COLUMN IF NOT EXISTS promo_code TEXT;
+        ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_uzs BIGINT NOT NULL DEFAULT 0;
+        ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_uzs BIGINT NOT NULL DEFAULT 0;
+        CREATE TABLE IF NOT EXISTS reviews (
+          id TEXT PRIMARY KEY,
+          product_id INT NOT NULL,
+          user_id TEXT NOT NULL,
+          rating INT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+          comment TEXT,
+          created_at BIGINT NOT NULL,
+          UNIQUE (user_id, product_id)
+        );
+        CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS password_resets (
+          token_hash TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          expires_at BIGINT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS auth_attempts (
+          key TEXT PRIMARY KEY,
+          count INT NOT NULL,
+          reset_at BIGINT NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS idx_click_order ON click_transactions(order_id);
         CREATE INDEX IF NOT EXISTS idx_pay_order ON payment_transactions(order_id);
         CREATE INDEX IF NOT EXISTS idx_tx_user ON transactions(user_id);
@@ -154,9 +206,9 @@ function ensureSchema() {
       if (rows[0].n === 0) {
         for (const p of seedCatalog) {
           await pool.query(
-            `INSERT INTO products (id, title, description, category, price_usd, image, rating_rate, rating_count)
+            `INSERT INTO products (id, title, description, category, price_uzs, image, rating_rate, rating_count)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
-            [p.id, p.title, p.description, p.category, p.priceUsd, p.image, p.ratingRate, p.ratingCount]
+            [p.id, p.title, p.description, p.category, Math.round((p.priceUsd * 12500) / 1000) * 1000, p.image, p.ratingRate, p.ratingCount]
           );
         }
         await pool.query("SELECT setval(pg_get_serial_sequence('products','id'), (SELECT MAX(id) FROM products))");
@@ -168,16 +220,23 @@ function ensureSchema() {
 
 function mapProduct(r, admin = false) {
   return {
-    ...(admin ? { cost: r.cost_usd == null ? null : Number(r.cost_usd) } : {}),
+    ...(admin ? { cost: r.cost_uzs == null ? null : Number(r.cost_uzs) } : {}),
     id: r.id,
     title: r.title,
     description: r.description,
     category: r.category,
-    price: Number(r.price_usd),
+    price: Number(r.price_uzs),
     image: r.image,
     rating: r.rating_rate == null ? null : { rate: Number(r.rating_rate), count: r.rating_count },
     stock: r.stock,
     active: r.active,
+  };
+}
+
+function mapPromo(r) {
+  return {
+    code: r.code, kind: r.kind, value: Number(r.value), minTotal: Number(r.min_total),
+    maxUses: r.max_uses, used: r.used, expiresAt: r.expires_at ? Number(r.expires_at) : null, active: r.active,
   };
 }
 
@@ -218,7 +277,6 @@ function mapOrder(r, items) {
   return {
     id: r.id,
     status: r.status,
-    totalUsd: Number(r.total_usd),
     totalUzs: Number(r.total_uzs),
     fullName: r.full_name,
     phone: r.phone,
@@ -226,6 +284,10 @@ function mapOrder(r, items) {
     provider: r.provider,
     createdAt: Number(r.created_at),
     paidAt: r.paid_at ? Number(r.paid_at) : null,
+    promoCode: r.promo_code || null,
+    discountUzs: Number(r.discount_uzs || 0),
+    deliveryUzs: Number(r.delivery_uzs || 0),
+    customerId: r.user_id,
     fulfillment: r.fulfillment || "new",
     fulfillmentAt: r.fulfillment_at ? Number(r.fulfillment_at) : null,
     adminNote: r.admin_note || "",
@@ -235,7 +297,7 @@ function mapOrder(r, items) {
       title: i.title,
       image: i.image,
       quantity: i.quantity,
-      unitPriceUsd: Number(i.unit_price_usd),
+      unitPriceUzs: Number(i.unit_price_uzs),
     })),
   };
 }
@@ -463,7 +525,7 @@ export const db = {
   async createProduct(p) {
     await ensureSchema();
     const { rows } = await pool.query(
-      `INSERT INTO products (title, description, category, price_usd, image, active, stock, cost_usd)
+      `INSERT INTO products (title, description, category, price_uzs, image, active, stock, cost_uzs)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
       [p.title, p.description || null, p.category, p.price, p.image || null, p.active !== false, p.stock ?? null, p.cost ?? null]
     );
@@ -474,10 +536,10 @@ export const db = {
     const { rows } = await pool.query(
       `UPDATE products SET
          title = COALESCE($2, title), description = COALESCE($3, description),
-         category = COALESCE($4, category), price_usd = COALESCE($5, price_usd),
+         category = COALESCE($4, category), price_uzs = COALESCE($5, price_uzs),
          image = COALESCE($6, image), active = COALESCE($7, active),
          stock = CASE WHEN $8 THEN $9::int ELSE stock END,
-         cost_usd = CASE WHEN $10 THEN $11::numeric ELSE cost_usd END
+         cost_uzs = CASE WHEN $10 THEN $11::bigint ELSE cost_uzs END
        WHERE id = $1 RETURNING *`,
       [id, p.title ?? null, p.description ?? null, p.category ?? null, p.price ?? null, p.image ?? null, p.active ?? null,
        p.stock !== undefined, p.stock ?? null, p.cost !== undefined, p.cost ?? null]
@@ -486,24 +548,25 @@ export const db = {
   },
 
   // Items carry only { productId, quantity }: title, image and price always come from the catalog.
-  async createOrder(userId, { items, fullName, phone, address, rate }) {
+  async createOrder(userId, { items, fullName, phone, address, rate, promoCode = null, discountUzs = 0, deliveryUzs = 0 }) {
     await ensureSchema();
-    const totalUsd = items.reduce((s, i) => s + i.unitPriceUsd * i.quantity, 0);
-    const totalUzs = Math.round(totalUsd * rate);
+    const subtotal = Math.round(items.reduce((s, i) => s + i.unitPriceUzs * i.quantity, 0));
+    const totalUzs = Math.max(0, subtotal - discountUzs) + deliveryUzs;
+    const totalUsd = totalUzs / rate; // legacy column, kept for history
     const id = nanoid(10);
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
       await client.query(
-        `INSERT INTO orders (id, user_id, status, total_usd, total_uzs, rate, full_name, phone, address, created_at)
-         VALUES ($1,$2,'pending',$3,$4,$5,$6,$7,$8,$9)`,
-        [id, userId, totalUsd, totalUzs, rate, fullName, phone, address, Date.now()]
+        `INSERT INTO orders (id, user_id, status, total_usd, total_uzs, rate, full_name, phone, address, created_at, promo_code, discount_uzs, delivery_uzs)
+         VALUES ($1,$2,'pending',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [id, userId, totalUsd, totalUzs, rate, fullName, phone, address, Date.now(), promoCode, discountUzs, deliveryUzs]
       );
       for (const it of items) {
         await client.query(
-          `INSERT INTO order_items (id, order_id, product_id, title, image, category, quantity, unit_price_usd, unit_cost_usd)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-          [nanoid(10), id, it.productId || null, it.title, it.image || null, it.category || null, it.quantity, it.unitPriceUsd, it.unitCostUsd ?? null]
+          `INSERT INTO order_items (id, order_id, product_id, title, image, category, quantity, unit_price_usd, unit_cost_usd, unit_price_uzs, unit_cost_uzs)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          [nanoid(10), id, it.productId || null, it.title, it.image || null, it.category || null, it.quantity, it.unitPriceUzs / rate, it.unitCostUzs == null ? null : it.unitCostUzs / rate, it.unitPriceUzs, it.unitCostUzs ?? null]
         );
       }
       await client.query("COMMIT");
@@ -557,6 +620,7 @@ export const db = {
         await client.query("ROLLBACK");
         return false;
       }
+      if (rows[0].promo_code) await client.query("UPDATE promos SET used = used + 1 WHERE code = $1", [rows[0].promo_code]);
       const { rows: items } = await client.query("SELECT product_id, quantity FROM order_items WHERE order_id = $1", [orderId]);
       for (const it of items) {
         if (it.product_id != null) {
@@ -590,6 +654,7 @@ export const db = {
         }
       }
       await client.query("DELETE FROM transactions WHERE order_id = $1", [orderId]);
+      await client.query("UPDATE promos SET used = GREATEST(used - 1, 0) WHERE code = (SELECT promo_code FROM orders WHERE id = $1)", [orderId]);
       await client.query("UPDATE orders SET status = 'cancelled' WHERE id = $1", [orderId]);
       await client.query("COMMIT");
       return true;
@@ -615,8 +680,8 @@ export const db = {
     const incomeCat = await catId("income", "Sotuvdan tushum");
     const expenseCat = await catId("expense", "Tovar xaridi");
     const { rows: orders } = await pool.query(
-      `SELECT o.id, o.total_usd, o.paid_at,
-              COALESCE((SELECT SUM(i.quantity * i.unit_cost_usd) FROM order_items i WHERE i.order_id = o.id), 0) AS cogs
+      `SELECT o.id, o.total_uzs, o.paid_at,
+              COALESCE((SELECT SUM(i.quantity * i.unit_cost_uzs) FROM order_items i WHERE i.order_id = o.id), 0) AS cogs
        FROM orders o
        WHERE o.status = 'paid'
          AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.user_id = $1 AND t.order_id = o.id AND t.type = 'income')`,
@@ -627,7 +692,7 @@ export const db = {
       await pool.query(
         `INSERT INTO transactions (id, type, amount, category, note, date, created_at, user_id, order_id)
          VALUES ($1,'income',$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`,
-        [nanoid(10), Number(o.total_usd), incomeCat, `Buyurtma #${o.id}`, when, Date.now(), userId, o.id]
+        [nanoid(10), Number(o.total_uzs), incomeCat, `Buyurtma #${o.id}`, when, Date.now(), userId, o.id]
       );
       if (Number(o.cogs) > 0) {
         await pool.query(
@@ -641,8 +706,14 @@ export const db = {
   },
 
   // ---- Company (admin) side ----
-  async adminListOrders({ view } = {}) {
+  async adminListOrders({ view, q } = {}) {
     await ensureSchema();
+    const params = [];
+    let search = "";
+    if (q) {
+      params.push(`%${String(q).toLowerCase()}%`);
+      search = ` AND (LOWER(o.full_name) LIKE $1 OR LOWER(o.phone) LIKE $1 OR LOWER(o.id) LIKE $1 OR LOWER(u.email) LIKE $1)`;
+    }
     const where =
       view === "unpaid" ? "o.status = 'pending'" :
       view === "cancelled" ? "o.status = 'cancelled'" :
@@ -650,7 +721,8 @@ export const db = {
       "TRUE";
     const { rows } = await pool.query(
       `SELECT o.*, u.email AS customer_email FROM orders o LEFT JOIN users u ON u.id = o.user_id
-       WHERE ${where} ORDER BY o.created_at DESC LIMIT 200`
+       WHERE ${where}${search} ORDER BY o.created_at DESC LIMIT 200`,
+      params
     );
     if (rows.length === 0) return [];
     const { rows: items } = await pool.query("SELECT * FROM order_items WHERE order_id = ANY($1)", [rows.map((r) => r.id)]);
@@ -676,7 +748,7 @@ export const db = {
         [since]
       );
       const { rows: c } = await pool.query(
-        `SELECT COALESCE(SUM(i.quantity * i.unit_cost_usd * o.rate),0)::bigint AS cogs
+        `SELECT COALESCE(SUM(i.quantity * i.unit_cost_uzs),0)::bigint AS cogs
          FROM order_items i JOIN orders o ON o.id = i.order_id WHERE o.status = 'paid' AND o.paid_at >= $1`,
         [since]
       );
@@ -688,19 +760,222 @@ export const db = {
       `SELECT CASE WHEN status = 'paid' THEN fulfillment ELSE status END AS k, COUNT(*)::int AS n FROM orders GROUP BY 1`
     );
     const { rows: top } = await pool.query(
-      `SELECT i.title, i.image, SUM(i.quantity)::int AS qty, SUM(i.quantity * i.unit_price_usd * o.rate)::bigint AS uzs
+      `SELECT i.title, i.image, SUM(i.quantity)::int AS qty, SUM(i.quantity * i.unit_price_uzs)::bigint AS uzs
        FROM order_items i JOIN orders o ON o.id = i.order_id WHERE o.status = 'paid'
        GROUP BY i.title, i.image ORDER BY qty DESC LIMIT 5`
     );
     const { rows: cust } = await pool.query("SELECT COUNT(*)::int AS n FROM users");
+    const { rows: dailyRows } = await pool.query(
+      `SELECT to_char(to_timestamp(paid_at / 1000.0), 'YYYY-MM-DD') AS d, SUM(total_uzs)::bigint AS uzs, COUNT(*)::int AS n
+       FROM orders WHERE status = 'paid' AND paid_at >= $1 GROUP BY 1`,
+      [now - 14 * day]
+    );
+    const dailyMap = Object.fromEntries(dailyRows.map((r) => [r.d, { uzs: Number(r.uzs), n: r.n }]));
+    const daily = [];
+    for (let k = 13; k >= 0; k--) {
+      const d = new Date(now - k * day);
+      const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+      daily.push({ date: key, uzs: dailyMap[key]?.uzs || 0, orders: dailyMap[key]?.n || 0 });
+    }
     const { rows: low } = await pool.query("SELECT id, title, stock FROM products WHERE active AND stock IS NOT NULL AND stock <= 5 ORDER BY stock LIMIT 10");
     return {
       today, week, month, all,
       byStatus: Object.fromEntries(byStatus.map((r) => [r.k, r.n])),
       top: top.map((t) => ({ title: t.title, image: t.image, qty: t.qty, uzs: Number(t.uzs) })),
       customers: cust[0].n,
+      daily,
       lowStock: low,
     };
+  },
+
+  async lowStockAmong(ids) {
+    await ensureSchema();
+    if (!ids.length) return [];
+    const { rows } = await pool.query("SELECT id, title, stock FROM products WHERE id = ANY($1::int[]) AND stock IS NOT NULL AND stock <= 3", [ids]);
+    return rows;
+  },
+
+  // ---- Settings ----
+  async getSettings() {
+    await ensureSchema();
+    const { rows } = await pool.query("SELECT key, value FROM settings");
+    return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  },
+  async setSettings(obj) {
+    await ensureSchema();
+    for (const [k, v] of Object.entries(obj)) {
+      await pool.query(
+        "INSERT INTO settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        [k, String(v)]
+      );
+    }
+  },
+
+  // ---- Product images (stored in the DB: serverless hosting has no writable disk) ----
+  async saveProductImage(productId, mime, buffer) {
+    await ensureSchema();
+    const now = Date.now();
+    await pool.query(
+      `INSERT INTO product_images (product_id, mime, data, updated_at) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (product_id) DO UPDATE SET mime = EXCLUDED.mime, data = EXCLUDED.data, updated_at = EXCLUDED.updated_at`,
+      [productId, mime, buffer, now]
+    );
+    await pool.query("UPDATE products SET image = $2 WHERE id = $1", [productId, `/api/products/${productId}/image?v=${now}`]);
+  },
+  async getProductImage(productId) {
+    await ensureSchema();
+    const { rows } = await pool.query("SELECT mime, data FROM product_images WHERE product_id = $1", [productId]);
+    return rows[0] || null;
+  },
+
+  // ---- Promo codes ----
+  async listPromos() {
+    await ensureSchema();
+    const { rows } = await pool.query("SELECT * FROM promos ORDER BY code");
+    return rows.map(mapPromo);
+  },
+  async createPromo(p) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `INSERT INTO promos (code, kind, value, min_total, max_uses, expires_at) VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (code) DO NOTHING RETURNING *`,
+      [p.code, p.kind, p.value, p.minTotal || 0, p.maxUses ?? null, p.expiresAt ?? null]
+    );
+    return rows[0] ? mapPromo(rows[0]) : null;
+  },
+  async setPromoActive(code, active) {
+    await ensureSchema();
+    const { rows } = await pool.query("UPDATE promos SET active = $2 WHERE code = $1 RETURNING *", [code, active]);
+    return rows[0] ? mapPromo(rows[0]) : null;
+  },
+  // Returns { discount } or { error } for a code and an order subtotal.
+  async checkPromo(code, subtotal) {
+    await ensureSchema();
+    const { rows } = await pool.query("SELECT * FROM promos WHERE code = $1", [String(code || "").trim().toUpperCase()]);
+    const p = rows[0];
+    if (!p || !p.active) return { error: "Promokod topilmadi" };
+    if (p.expires_at && Number(p.expires_at) < Date.now()) return { error: "Promokod muddati tugagan" };
+    if (p.max_uses != null && p.used >= p.max_uses) return { error: "Promokod limiti tugagan" };
+    if (subtotal < Number(p.min_total)) return { error: `Bu promokod ${Number(p.min_total).toLocaleString("en-US")} so'mdan yuqori buyurtmalarga amal qiladi` };
+    const raw = p.kind === "percent" ? Math.round((subtotal * Number(p.value)) / 100) : Number(p.value);
+    return { code: p.code, discount: Math.min(raw, subtotal) };
+  },
+
+  // ---- Reviews ----
+  async listReviews(productId) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT r.rating, r.comment, r.created_at, u.email FROM reviews r LEFT JOIN users u ON u.id = r.user_id
+       WHERE r.product_id = $1 ORDER BY r.created_at DESC LIMIT 50`,
+      [productId]
+    );
+    return rows.map((r) => ({
+      rating: r.rating,
+      comment: r.comment || "",
+      createdAt: Number(r.created_at),
+      author: r.email ? r.email.split("@")[0].slice(0, 2) + "***" : "Mijoz",
+    }));
+  },
+  async myReviewedProductIds(userId) {
+    await ensureSchema();
+    const { rows } = await pool.query("SELECT product_id FROM reviews WHERE user_id = $1", [userId]);
+    return rows.map((r) => r.product_id);
+  },
+  async hasDelivered(userId, productId) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT 1 FROM orders o JOIN order_items i ON i.order_id = o.id
+       WHERE o.user_id = $1 AND i.product_id = $2 AND o.status = 'paid' AND o.fulfillment = 'delivered' LIMIT 1`,
+      [userId, productId]
+    );
+    return rows.length > 0;
+  },
+  async saveReview(userId, productId, rating, comment) {
+    await ensureSchema();
+    await pool.query(
+      `INSERT INTO reviews (id, product_id, user_id, rating, comment, created_at) VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (user_id, product_id) DO UPDATE SET rating = EXCLUDED.rating, comment = EXCLUDED.comment, created_at = EXCLUDED.created_at`,
+      [nanoid(10), productId, userId, rating, comment, Date.now()]
+    );
+    await pool.query(
+      `UPDATE products SET rating_rate = (SELECT ROUND(AVG(rating)::numeric, 1) FROM reviews WHERE product_id = $1),
+                           rating_count = (SELECT COUNT(*) FROM reviews WHERE product_id = $1)
+       WHERE id = $1`,
+      [productId]
+    );
+  },
+
+  // ---- Admin: customers & order cancellation ----
+  async adminCustomers() {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT u.id, u.email, u.created_at,
+              COUNT(o.id) FILTER (WHERE o.status = 'paid')::int AS orders,
+              COALESCE(SUM(o.total_uzs) FILTER (WHERE o.status = 'paid'), 0)::bigint AS spent,
+              MAX(o.paid_at) AS last_order
+       FROM users u LEFT JOIN orders o ON o.user_id = u.id
+       GROUP BY u.id ORDER BY spent DESC, u.created_at DESC LIMIT 200`
+    );
+    return rows.map((r) => ({
+      id: r.id, email: r.email, orders: r.orders, spent: Number(r.spent),
+      lastOrder: r.last_order ? Number(r.last_order) : null, joinedAt: Number(r.created_at),
+    }));
+  },
+  async adminOrdersCsv() {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT o.*, u.email AS customer_email FROM orders o LEFT JOIN users u ON u.id = o.user_id ORDER BY o.created_at DESC`
+    );
+    const { rows: items } = await pool.query("SELECT * FROM order_items");
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const head = ["ID", "Sana", "Holat", "Yetkazish", "Mijoz", "Email", "Telefon", "Manzil", "Tovarlar", "Summa (so'm)", "Chegirma", "Yetkazish narxi", "To'lov"];
+    const lines = rows.map((o) =>
+      [
+        o.id, new Date(Number(o.created_at)).toISOString(), o.status, o.status === "paid" ? o.fulfillment : "", o.full_name, o.customer_email,
+        o.phone, o.address,
+        items.filter((i) => i.order_id === o.id).map((i) => `${i.quantity}x ${i.title}`).join("; "),
+        o.total_uzs, o.discount_uzs, o.delivery_uzs, o.provider,
+      ].map(esc).join(",")
+    );
+    return "﻿" + [head.map(esc).join(","), ...lines].join("\n");
+  },
+
+  // ---- Password reset & brute-force limits ----
+  async setUserPassword(userId, hash) {
+    await ensureSchema();
+    await pool.query("UPDATE users SET password_hash = $2 WHERE id = $1", [userId, hash]);
+    await pool.query("DELETE FROM password_resets WHERE user_id = $1", [userId]);
+  },
+  async createResetToken(userId, tokenHash, ttlMs) {
+    await ensureSchema();
+    await pool.query("DELETE FROM password_resets WHERE user_id = $1 OR expires_at < $2", [userId, Date.now()]);
+    await pool.query("INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES ($1,$2,$3)", [tokenHash, userId, Date.now() + ttlMs]);
+  },
+  async consumeResetToken(tokenHash) {
+    await ensureSchema();
+    const { rows } = await pool.query("DELETE FROM password_resets WHERE token_hash = $1 RETURNING user_id, expires_at", [tokenHash]);
+    if (!rows[0] || Number(rows[0].expires_at) < Date.now()) return null;
+    return rows[0].user_id;
+  },
+  // Returns true if the key is over its limit. `hit` records one attempt.
+  async rateLimited(key, { max, windowMs, hit = true }) {
+    await ensureSchema();
+    const now = Date.now();
+    const { rows } = await pool.query(
+      hit
+        ? `INSERT INTO auth_attempts (key, count, reset_at) VALUES ($1, 1, $2)
+           ON CONFLICT (key) DO UPDATE SET
+             count = CASE WHEN auth_attempts.reset_at < $3 THEN 1 ELSE auth_attempts.count + 1 END,
+             reset_at = CASE WHEN auth_attempts.reset_at < $3 THEN $2 ELSE auth_attempts.reset_at END
+           RETURNING count`
+        : `SELECT count FROM auth_attempts WHERE key = $1 AND reset_at >= $2`,
+      hit ? [key, now + windowMs, now] : [key, now]
+    );
+    return (rows[0]?.count || 0) > max;
+  },
+  async clearRateLimit(key) {
+    await ensureSchema();
+    await pool.query("DELETE FROM auth_attempts WHERE key = $1", [key]);
   },
 
   // ---- Click transactions ----

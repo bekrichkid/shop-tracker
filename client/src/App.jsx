@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { api, auth } from "./api.js";
 import AuthScreen from "./components/AuthScreen.jsx";
 import SummaryCards from "./components/SummaryCards.jsx";
@@ -6,15 +6,44 @@ import GoalCard from "./components/GoalCard.jsx";
 import TransactionForm from "./components/TransactionForm.jsx";
 import Filters from "./components/Filters.jsx";
 import TransactionList from "./components/TransactionList.jsx";
-import ChartsPanel from "./components/ChartsPanel.jsx";
 import ProductGrid from "./components/ProductGrid.jsx";
 import CategoryManager from "./components/CategoryManager.jsx";
 import ProfileTab from "./components/ProfileTab.jsx";
 import CartSheet from "./components/CartSheet.jsx";
 import ProductSheet from "./components/ProductSheet.jsx";
-import { AdminOverview, AdminOrders, AdminProducts } from "./components/AdminViews.jsx";
+// Seller-only screens and charts are loaded on demand so customers download a much smaller app.
+const admin = (name) => lazy(() => import("./components/AdminViews.jsx").then((m) => ({ default: m[name] })));
+const AdminOverview = admin("AdminOverview");
+const AdminOrders = admin("AdminOrders");
+const AdminProducts = admin("AdminProducts");
+const AdminCustomers = admin("AdminCustomers");
+const AdminSettingsSheet = admin("AdminSettingsSheet");
+const AdminPromosSheet = admin("AdminPromosSheet");
+const ChartsPanel = lazy(() => import("./components/ChartsPanel.jsx"));
 import OrdersList from "./components/OrdersList.jsx";
 import { formatUzs } from "./format.js";
+import { useT, tr } from "./i18n.jsx";
+
+// Up to 3 recent delivery addresses, newest first.
+function loadContacts() {
+  try {
+    const list = JSON.parse(localStorage.getItem("contacts"));
+    if (Array.isArray(list) && list.length) return list;
+    const old = JSON.parse(localStorage.getItem("contact"));
+    return old && old.address ? [old] : [];
+  } catch {
+    return [];
+  }
+}
+function saveContact(c) {
+  if (!c || !c.address) return;
+  try {
+    const rest = loadContacts().filter((x) => x.address !== c.address);
+    localStorage.setItem("contacts", JSON.stringify([c, ...rest].slice(0, 3)));
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 const emptyFilters = { type: "", category: "", q: "" };
 
@@ -70,6 +99,8 @@ const ADMIN_TABS = [
 
 export default function App() {
   const [user, setUser] = useState(null);
+  // Link from the password-reset email: /?reset=TOKEN
+  const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get("reset"));
   const [booting, setBooting] = useState(() => !!auth.getToken());
   const [theme, setTheme] = useState(() => {
     try {
@@ -108,12 +139,24 @@ export default function App() {
     setUser(u);
   }
 
-  if (booting) return <div className="splash">Yuklanmoqda...</div>;
-  if (!user) return <AuthScreen onAuthed={handleAuthed} />;
+  if (booting) return <div className="splash">{tr("Yuklanmoqda...")}</div>;
+  if (!user) {
+    return (
+      <AuthScreen
+        onAuthed={handleAuthed}
+        resetToken={resetToken}
+        onResetDone={() => {
+          setResetToken(null);
+          window.history.replaceState({}, "", window.location.pathname);
+        }}
+      />
+    );
+  }
   return <Shop user={user} theme={theme} setTheme={setTheme} onLogout={logout} />;
 }
 
 function Shop({ user, theme, setTheme, onLogout }) {
+  const tt = useT();
   const isAdmin = Boolean(user.isAdmin);
   const TABS = isAdmin ? ADMIN_TABS : CUSTOMER_TABS;
   const [tab, setTab] = useState(isAdmin ? "overview" : "shop");
@@ -127,11 +170,35 @@ function Shop({ user, theme, setTheme, onLogout }) {
   const [toast, setToast] = useState(null);
   const [showManager, setShowManager] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showPromos, setShowPromos] = useState(false);
   const [showCart, setShowCart] = useState(false);
   const [openProduct, setOpenProduct] = useState(null);
   const [store, setStore] = useState(null);
   const [providers, setProviders] = useState([]);
-  const [rate, setRate] = useState(12500);
+  const favKey = `fav_${user.id}`;
+  const [favs, setFavs] = useState(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(favKey)) || []);
+    } catch {
+      return new Set();
+    }
+  });
+  const toggleFav = useCallback(
+    (id) =>
+      setFavs((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        try {
+          localStorage.setItem(favKey, JSON.stringify([...next]));
+        } catch {
+          /* storage unavailable */
+        }
+        return next;
+      }),
+    [favKey]
+  );
   const cartKey = `cart_${user.id}`;
   const [cart, setCart] = useState(() => {
     try {
@@ -152,7 +219,6 @@ function Shop({ user, theme, setTheme, onLogout }) {
   useEffect(() => {
     api.paymentConfig().then((c) => {
       setProviders(c.providers);
-      setRate(c.rate);
     }).catch(() => {});
     api.getStore().then(setStore).catch(() => {});
   }, []);
@@ -220,7 +286,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
 
   const toastTimer = useRef(null);
   const showToast = useCallback((msg) => {
-    setToast(msg);
+    setToast(tr(msg));
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 3200);
   }, []);
@@ -246,13 +312,13 @@ function Shop({ user, theme, setTheme, onLogout }) {
   const handleSetGoal = (data) => act(() => api.setGoal(data));
   const cartQty = useMemo(() => Object.fromEntries(cart.map((i) => [i.productId, i.quantity])), [cart]);
   const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
-  const cartTotalUzs = Math.round(cart.reduce((s, i) => s + i.unitPriceUsd * i.quantity, 0) * rate);
+  const cartTotalUzs = cart.reduce((s, i) => s + i.unitPriceUzs * i.quantity, 0);
 
   function addToCart(p) {
     setCart((prev) => {
       const found = prev.find((i) => i.productId === p.id);
       if (found) return prev.map((i) => (i.productId === p.id ? { ...i, quantity: Math.min(99, i.quantity + 1) } : i));
-      return [...prev, { productId: p.id, title: p.title, image: p.image, category: p.category, unitPriceUsd: p.price, quantity: 1 }];
+      return [...prev, { productId: p.id, title: p.title, image: p.image, category: p.category, unitPriceUzs: p.price, quantity: 1 }];
     });
     showToast("Savatga qo'shildi");
   }
@@ -264,7 +330,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
         .filter((i) => byId.has(i.productId))
         .map((i) => {
           const p = byId.get(i.productId);
-          return { ...i, title: p.title, image: p.image, category: p.category, unitPriceUsd: p.price };
+          return { ...i, title: p.title, image: p.image, category: p.category, unitPriceUzs: p.price };
         });
       return JSON.stringify(next) === JSON.stringify(prev) ? prev : next;
     });
@@ -276,7 +342,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
         if (it.productId == null) continue;
         const found = next.find((c) => c.productId === it.productId);
         if (found) found.quantity = Math.min(99, found.quantity + it.quantity);
-        else next.push({ productId: it.productId, title: it.title, image: it.image, category: "", unitPriceUsd: it.unitPriceUsd, quantity: Math.min(99, it.quantity) });
+        else next.push({ productId: it.productId, title: it.title, image: it.image, category: "", unitPriceUzs: it.unitPriceUzs, quantity: Math.min(99, it.quantity) });
       }
       return next.map((c) => ({ ...c }));
     });
@@ -296,11 +362,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
   }
 
   async function handlePaid(res) {
-    try {
-      localStorage.setItem("contact", JSON.stringify(res.contact || {}));
-    } catch {
-      /* storage unavailable */
-    }
+    saveContact(res.contact);
     if (res.redirect) return goToPayment(res.redirect, res.orderId);
     setCart([]);
     setShowCart(false);
@@ -379,14 +441,20 @@ function Shop({ user, theme, setTheme, onLogout }) {
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 {t.icon}
               </svg>
-              <span>{t.label}</span>
+              <span>{tt(t.label)}</span>
             </button>
           ))}
         </nav>
       </header>
 
       <main className="content" key={tab}>
-        {tab === "overview" && isAdmin && <AdminOverview onOpenOrders={() => setTab("orders")} />}
+        <Suspense fallback={<div className="muted">{tt("Yuklanmoqda...")}</div>}>
+        {tab === "overview" && isAdmin && (
+          <div className="stack">
+            <AdminOverview onOpenOrders={() => setTab("orders")} />
+            <AdminCustomers onToast={showToast} />
+          </div>
+        )}
         {tab === "orders" && isAdmin && <AdminOrders onToast={showToast} />}
         {tab === "products" && isAdmin && <AdminProducts onToast={showToast} />}
 
@@ -407,10 +475,10 @@ function Shop({ user, theme, setTheme, onLogout }) {
           </div>
         )}
 
-        {tab === "shop" && !isAdmin && <ProductGrid onAddToCart={addToCart} cartQty={cartQty} onCatalog={syncCartWithCatalog} onOpen={setOpenProduct} />}
+        {tab === "shop" && !isAdmin && <ProductGrid onAddToCart={addToCart} cartQty={cartQty} onCatalog={syncCartWithCatalog} onOpen={setOpenProduct} favs={favs} onToggleFav={toggleFav} />}
 
         {tab === "orders" && !isAdmin && (
-          <OrdersList providers={providers} onRedirect={goToPayment} onChanged={syncAll} onReorder={reorder} />
+          <OrdersList providers={providers} onRedirect={goToPayment} onChanged={syncAll} onReorder={reorder} onToast={showToast} />
         )}
 
         {tab === "profile" && (
@@ -421,10 +489,15 @@ function Shop({ user, theme, setTheme, onLogout }) {
             onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
             onOpenCategories={() => setShowManager(true)}
             onExport={handleExport}
+            onExportOrders={() => api.adminOrdersCsv().catch((e) => showToast(e.message))}
+            onOpenSettings={() => setShowSettings(true)}
+            onOpenPromos={() => setShowPromos(true)}
+            onToast={showToast}
             onLogout={onLogout}
             onDeleteAccount={handleDeleteAccount}
           />
         )}
+        </Suspense>
       </main>
 
       {showAdd && (
@@ -452,10 +525,10 @@ function Shop({ user, theme, setTheme, onLogout }) {
         />
       )}
 
-      {cartCount > 0 && !showCart && (
+      {cartCount > 0 && !showCart && !isAdmin && (
         <button className="cart-bar" onClick={() => setShowCart(true)}>
           <span className="cart-count" key={cartCount}>{cartCount}</span>
-          <span>Savatni ko'rish</span>
+          <span>{tt("Savatni ko'rish")}</span>
           <b>{formatUzs(cartTotalUzs)}</b>
         </button>
       )}
@@ -464,14 +537,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
         <CartSheet
           cart={cart}
           providers={providers}
-          rate={rate}
-          savedContact={(() => {
-            try {
-              return JSON.parse(localStorage.getItem("contact"));
-            } catch {
-              return null;
-            }
-          })()}
+          savedContacts={loadContacts()}
           onChangeQty={changeQty}
           onRemove={removeFromCart}
           onClose={() => setShowCart(false)}
@@ -480,8 +546,13 @@ function Shop({ user, theme, setTheme, onLogout }) {
       )}
 
       {openProduct && (
-        <ProductSheet product={openProduct} inCart={cartQty[openProduct.id]} rate={rate} onAdd={addToCart} onClose={() => setOpenProduct(null)} />
+        <ProductSheet product={openProduct} inCart={cartQty[openProduct.id]} onAdd={addToCart} onClose={() => setOpenProduct(null)} fav={favs.has(openProduct.id)} onToggleFav={toggleFav} />
       )}
+
+      <Suspense fallback={null}>
+      {showSettings && <AdminSettingsSheet onClose={() => { setShowSettings(false); api.getStore().then(setStore).catch(() => {}); }} onToast={showToast} />}
+      {showPromos && <AdminPromosSheet onClose={() => setShowPromos(false)} onToast={showToast} />}
+      </Suspense>
 
       {toast && <div className="toast" role="status">{toast}</div>}
     </div>

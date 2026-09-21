@@ -6,7 +6,8 @@
 <title>Maxfiylik siyosati — Tovar Do'koni</title>
 <style>
   body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;max-width:720px;margin:0 auto;padding:24px 18px 60px;line-height:1.6;color:#0f172a}
-  h1{font-size:26px} h2{font-size:18px;margin-top:28px} .muted{color:#64748b}
+  h1{font-size:26px} h2{font-size:18px;margin-top:28px} .muted{color:#64748b} mark{background:#fef08a;padding:0 3px;border-radius:3px}
+  @media (prefers-color-scheme: dark){body{background:#0b1114;color:#e5e7eb}.muted{color:#94a3b8}mark{background:#854d0e;color:#fff}a{color:#5eead4}}
 </style>
 </head>
 <body>
@@ -15,20 +16,30 @@
 
 <h2>Qanday ma'lumotlarni yig'amiz</h2>
 <ul>
-  <li><b>Hisob ma'lumotlari:</b> email manzilingiz va parolingiz (parol faqat shifrlangan, qaytarib bo'lmaydigan ko'rinishda saqlanadi).</li>
-  <li><b>Foydalanish ma'lumotlari:</b> siz kiritgan tranzaksiyalar, kategoriyalar, limitlar, maqsadlar va sotib olingan/sotilgan tovarlar.</li>
+  <li><b>Hisob:</b> email manzilingiz va parolingiz (parol faqat shifrlangan, qaytarib bo'lmaydigan ko'rinishda saqlanadi).</li>
+  <li><b>Buyurtma:</b> ismingiz, telefon raqamingiz, yetkazib berish manzilingiz, buyurtma tarkibi, summasi va holati.</li>
+  <li><b>Sharhlar va sevimlilar:</b> siz qoldirgan baho va fikrlar (sevimlilar ro'yxati faqat qurilmangizda saqlanadi).</li>
 </ul>
 
 <h2>Nima uchun ishlatamiz</h2>
-<p>Ma'lumotlaringiz faqat ilovaning ishlashi uchun: hisobingizga kirish, moliyaviy hisobotlaringizni va omboringizni ko'rsatish uchun ishlatiladi. Ma'lumotlaringizni reklama maqsadida ishlatmaymiz va uchinchi shaxslarga sotmaymiz.</p>
+<p>Ma'lumotlaringiz buyurtmani qabul qilish, tayyorlash va yetkazib berish, siz bilan bog'lanish, buyurtma holatini ko'rsatish va parolni tiklash uchun ishlatiladi. Ularni reklama maqsadida ishlatmaymiz va sotmaymiz.</p>
 
-<h2>Uchinchi tomon xizmatlari</h2>
-<p>Tovar katalogi (nom, rasm, narx) tashqi ochiq API (fakestoreapi.com) dan olinadi. Ma'lumotlar Neon (PostgreSQL) bulut bazasida saqlanadi. To'lovlar amalga oshirilganda to'lov provayderi (Payme/Click/Uzum) to'lov ma'lumotlarini o'zi qayta ishlaydi; biz karta ma'lumotlarini saqlamaymiz.</p>
+<h2>Kimlar bilan bo'lishamiz</h2>
+<ul>
+  <li><b>Do'kon xodimlari</b> — buyurtmani bajarish uchun ismingiz, telefon va manzilingizni ko'radi (shu jumladan xabarnoma sifatida Telegram orqali).</li>
+  <li><b>To'lov provayderlari (Payme, Click)</b> — to'lovni o'zlari qayta ishlaydi. Karta ma'lumotlaringiz bizga berilmaydi va saqlanmaydi.</li>
+  <li><b>Texnik xizmatlar</b> — ma'lumotlar bulut bazasida (Neon/PostgreSQL) va hosting (Netlify)da saqlanadi; xat yuborish uchun email xizmatidan foydalanamiz.</li>
+</ul>
 
-<h2>Ma'lumotlarni o'chirish</h2>
-<p>Hisobingizni ilovaning o'zida "Profil → Hisobni o'chirish" orqali istalgan vaqt butunlay o'chirishingiz mumkin. Bunda hisobingiz va unga tegishli barcha ma'lumotlar qaytarib bo'lmaydigan tarzda o'chiriladi.</p>
+<h2>Saqlash muddati va o'chirish</h2>
+<p>Hisobingizni ilovaning o'zida "Profil → Hisobni o'chirish" orqali istalgan vaqt o'chirishingiz mumkin. Bunda email, parol va sharhlaringiz o'chiriladi. Buyurtmalar do'kon hisob-kitobi va qonuniy talablar uchun saqlanib qoladi, lekin ularga bog'liq shaxsiy ma'lumotlaringiz (ism, telefon, manzil) o'chiriladi.</p>
 
-<h2>Aloqa</h2>
-<p>Savollar uchun: <b>[aloqa email manzilini shu yerga yozing]</b></p>
+<h2>Xavfsizlik</h2>
+<p>Ma'lumotlar himoyalangan (HTTPS) aloqa orqali uzatiladi, parollar shifrlangan holda saqlanadi, kirishga urinishlar cheklangan.</p>
+
+<h2>Bolalar</h2>
+<p>Xizmat 13 yoshgacha bo'lgan bolalarga mo'ljallanmagan.</p>
+
+<p class="muted" style="margin-top:32px">Savollar bo'lsa: <mark>[aloqa email manzilini shu yerga yozing]</mark></p>
 </body>
 </html>

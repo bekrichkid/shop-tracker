@@ -1,4 +1,5 @@
 import { API_BASE } from "./config.js";
+import { tr } from "./i18n.jsx";
 
 const BASE = `${API_BASE}/api`;
 const TOKEN_KEY = "shop_token";
@@ -40,7 +41,7 @@ async function request(path, options = {}) {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `So'rov xato: ${res.status}`);
+    throw new Error(tr(body.error || `So'rov xato: ${res.status}`));
   }
   const contentType = res.headers.get("content-type") || "";
   return contentType.includes("application/json") ? res.json() : res.text();
@@ -71,9 +72,34 @@ export const api = {
 
   getStore: () => request("/store"),
   getProducts: () => request("/products"),
-  adminOrders: (view) => request(`/admin/orders${view ? `?view=${view}` : ""}`),
+  adminOrders: (view, q) => request(`/admin/orders?${new URLSearchParams({ ...(view ? { view } : {}), ...(q ? { q } : {}) })}`),
   adminSetOrder: (id, data) => request(`/admin/orders/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   adminStats: () => request("/admin/stats"),
+  adminCancelOrder: (id) => request(`/admin/orders/${id}/cancel`, { method: "POST", body: "{}" }),
+  adminCustomers: () => request("/admin/customers"),
+  adminResetPassword: (id) => request(`/admin/customers/${id}/reset-password`, { method: "POST", body: "{}" }),
+  adminPromos: () => request("/admin/promos"),
+  adminCreatePromo: (data) => request("/admin/promos", { method: "POST", body: JSON.stringify(data) }),
+  adminSetPromoActive: (code, active) => request(`/admin/promos/${code}`, { method: "PUT", body: JSON.stringify({ active }) }),
+  adminSettings: () => request("/admin/settings"),
+  adminSaveSettings: (data) => request("/admin/settings", { method: "PUT", body: JSON.stringify(data) }),
+  adminUploadImage: (id, dataUrl) => request(`/admin/products/${id}/image`, { method: "POST", body: JSON.stringify({ dataUrl }) }),
+  adminOrdersCsv: async () => {
+    const csv = await request("/admin/orders.csv");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "buyurtmalar.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+  quote: (items, promoCode) => request("/quote", { method: "POST", body: JSON.stringify({ items, promoCode }) }),
+  getReviews: (productId) => request(`/products/${productId}/reviews`),
+  myReviews: () => request("/reviews/mine"),
+  saveReview: (data) => request("/reviews", { method: "POST", body: JSON.stringify(data) }),
+  forgot: (email) => request("/auth/forgot", { method: "POST", body: JSON.stringify({ email }) }),
+  resetPassword: (token, password) => request("/auth/reset", { method: "POST", body: JSON.stringify({ token, password }) }),
+  changePassword: (current, next) => request("/auth/change-password", { method: "POST", body: JSON.stringify({ current, next }) }),
   adminSyncLedger: () => request("/admin/sync-ledger", { method: "POST", body: "{}" }),
   adminProducts: () => request("/admin/products"),
   adminCreateProduct: (data) => request("/admin/products", { method: "POST", body: JSON.stringify(data) }),

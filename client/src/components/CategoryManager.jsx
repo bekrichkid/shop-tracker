@@ -98,7 +98,7 @@ export default function CategoryManager({ categories, budgets, monthTransactions
                   <div className="cat-edit-row">
                     <input
                       type="number"
-                      placeholder="Oylik limit ($)"
+                      placeholder="Oylik limit (so'm)"
                       value={value}
                       onChange={(e) => setValue(e.target.value)}
                     />

@@ -33,7 +33,7 @@ export default function GoalCard({ goal, monthIncome, monthExpense, onSetGoal })
       <div className="goal-card">
         <div className="goal-edit-row">
           <input placeholder="Maqsad nomi" value={name} onChange={(e) => setName(e.target.value)} />
-          <input type="number" placeholder="Summasi ($)" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <input type="number" placeholder="Summasi (so'm)" value={amount} onChange={(e) => setAmount(e.target.value)} />
         </div>
         <div className="goal-edit-actions">
           <button className="link-btn" onClick={() => setEditing(false)}>Bekor qilish</button>
