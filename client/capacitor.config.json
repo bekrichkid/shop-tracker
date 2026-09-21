@@ -1,0 +1,9 @@
+{
+  "appId": "uz.tovardokoni.shop",
+  "appName": "Tovar Do'koni",
+  "webDir": "dist",
+  "ios": {
+    "contentInset": "always",
+    "backgroundColor": "#f4f6f8"
+  }
+}

@@ -26,6 +26,11 @@ export const auth = {
   },
 };
 
+// Photos uploaded by the seller are served by the API; in the native app the page origin is not the server.
+const fixImg = (src) => (src && src.startsWith("/api/") ? API_BASE + src : src);
+const withImages = (x) => (x && x.image ? { ...x, image: fixImg(x.image) } : x);
+const withItemImages = (o) => (o && o.items ? { ...o, items: o.items.map(withImages) } : o);
+
 async function request(path, options = {}) {
   const token = auth.getToken();
   const res = await fetch(BASE + path, {
@@ -55,7 +60,7 @@ export const api = {
 
   paymentConfig: () => request("/payments/config"),
   createOrder: (data) => request("/orders", { method: "POST", body: JSON.stringify(data) }),
-  listOrders: () => request("/orders"),
+  listOrders: () => request("/orders").then((l) => l.map(withItemImages)),
   getOrder: (id) => request(`/orders/${id}`),
   payOrder: (id, provider) => request(`/orders/${id}/pay`, { method: "POST", body: JSON.stringify({ provider }) }),
   cancelOrder: (id) => request(`/orders/${id}/cancel`, { method: "POST", body: "{}" }),
@@ -71,7 +76,7 @@ export const api = {
   },
 
   getStore: () => request("/store"),
-  getProducts: () => request("/products"),
+  getProducts: () => request("/products").then((l) => l.map(withImages)),
   adminOrders: (view, q) => request(`/admin/orders?${new URLSearchParams({ ...(view ? { view } : {}), ...(q ? { q } : {}) })}`),
   adminSetOrder: (id, data) => request(`/admin/orders/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   adminStats: () => request("/admin/stats"),
@@ -101,7 +106,7 @@ export const api = {
   resetPassword: (token, password) => request("/auth/reset", { method: "POST", body: JSON.stringify({ token, password }) }),
   changePassword: (current, next) => request("/auth/change-password", { method: "POST", body: JSON.stringify({ current, next }) }),
   adminSyncLedger: () => request("/admin/sync-ledger", { method: "POST", body: "{}" }),
-  adminProducts: () => request("/admin/products"),
+  adminProducts: () => request("/admin/products").then((l) => l.map(withImages)),
   adminCreateProduct: (data) => request("/admin/products", { method: "POST", body: JSON.stringify(data) }),
   adminUpdateProduct: (id, data) => request(`/admin/products/${id}`, { method: "PUT", body: JSON.stringify(data) }),
 

@@ -23,6 +23,7 @@ const ChartsPanel = lazy(() => import("./components/ChartsPanel.jsx"));
 import OrdersList from "./components/OrdersList.jsx";
 import { formatUzs } from "./format.js";
 import { useT, tr } from "./i18n.jsx";
+import { IS_NATIVE } from "./config.js";
 
 // Up to 3 recent delivery addresses, newest first.
 function loadContacts() {
@@ -372,11 +373,17 @@ function Shop({ user, theme, setTheme, onLogout }) {
     setCart((prev) => (q < 1 ? prev.filter((i) => i.productId !== id) : prev.map((i) => (i.productId === id ? { ...i, quantity: Math.min(99, q) } : i))));
   const removeFromCart = (id) => setCart((prev) => prev.filter((i) => i.productId !== id));
 
+  // Web: leave the page for the provider's checkout. Native app: open it in an in-app browser and
+  // confirm the result when the customer comes back (see the listeners below).
   function goToPayment(url, orderId) {
     try {
       localStorage.setItem("pending_order", orderId);
     } catch {
       /* storage unavailable */
+    }
+    if (IS_NATIVE) {
+      import("@capacitor/browser").then(({ Browser }) => Browser.open({ url }));
+      return;
     }
     window.location.assign(url);
   }
@@ -390,43 +397,71 @@ function Shop({ user, theme, setTheme, onLogout }) {
     showToast("To'lov qabul qilindi. Buyurtmangiz qabul qilindi");
   }
 
-  // Returning from the payment page (?order=ID): confirm the result with the server.
+  // Asks the server whether an order got paid (the provider notifies the server, not the browser).
+  const confirmPayment = useCallback(async (orderId, isCancelled = () => false) => {
+    for (let i = 0; i < 6 && !isCancelled(); i++) {
+      try {
+        const order = await api.getOrder(orderId);
+        if (order.status === "paid") {
+          setCart([]);
+          setShowCart(false);
+          setTab("orders");
+          showToast("To'lov qabul qilindi. Buyurtmangiz qabul qilindi");
+          return "paid";
+        }
+        if (order.status === "cancelled") {
+          showToast("To'lov bekor qilingan");
+          return "cancelled";
+        }
+      } catch {
+        return "error";
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    if (!isCancelled()) showToast("To'lov tekshirilmoqda. Holatni Buyurtmalarim bo'limida ko'ring");
+    return "pending";
+  }, [showToast]);
+
+  // Web: returning from the payment page (?order=ID).
   useEffect(() => {
     const orderId = new URLSearchParams(window.location.search).get("order");
-    if (!orderId) return;
+    if (!orderId) return undefined;
     let cancelled = false;
-    const finish = () => {
+    confirmPayment(orderId, () => cancelled).then(() => {
       if (!cancelled) window.history.replaceState({}, "", window.location.pathname);
-    };
-    (async () => {
-      for (let i = 0; i < 6 && !cancelled; i++) {
-        try {
-          const order = await api.getOrder(orderId);
-          if (order.status === "paid") {
-            setCart([]);
-            setTab("orders");
-            showToast("To'lov qabul qilindi. Buyurtmangiz qabul qilindi");
-            return finish();
-          }
-          if (order.status === "cancelled") {
-            showToast("To'lov bekor qilingan");
-            return finish();
-          }
-        } catch {
-          return finish();
-        }
-        await new Promise((r) => setTimeout(r, 2000));
-      }
-      if (!cancelled) {
-        showToast("To'lov tekshirilmoqda. Holatni Buyurtmalarim bo'limida ko'ring");
-        finish();
-      }
-    })();
+    });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Native: the in-app browser was closed, or the app came back to the foreground.
+  useEffect(() => {
+    if (!IS_NATIVE) return undefined;
+    const handles = [];
+    const check = () => {
+      let id = null;
+      try {
+        id = localStorage.getItem("pending_order");
+      } catch {
+        /* storage unavailable */
+      }
+      if (!id) return;
+      confirmPayment(id).then((r) => {
+        if (r !== "pending") {
+          try {
+            localStorage.removeItem("pending_order");
+          } catch {
+            /* storage unavailable */
+          }
+        }
+      });
+    };
+    import("@capacitor/browser").then(({ Browser }) => Browser.addListener("browserFinished", check).then((h) => handles.push(h)));
+    import("@capacitor/app").then(({ App: CapApp }) => CapApp.addListener("appStateChange", (st) => st.isActive && check()).then((h) => handles.push(h)));
+    return () => handles.forEach((h) => h.remove());
+  }, [confirmPayment]);
   const handleAddCategory = (data) => act(() => api.addCategory(data));
   const handleDeleteCategory = (id) => act(() => api.deleteCategory(id));
   const handleSetBudget = (id, limit) => act(() => api.setBudget(id, limit));
