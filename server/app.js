@@ -152,10 +152,12 @@ app.get("/api/summary", async (req, res, next) => {
 
 app.get("/api/export/csv", async (req, res, next) => {
   try {
-    const list = await db.listTransactions();
+    const [list, categories] = await Promise.all([db.listTransactions(), db.listCategories()]);
+    const nameById = Object.fromEntries(categories.map((c) => [c.id, c.name]));
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const header = "sana,turi,kategoriya,summa,izoh\n";
     const rows = list
-      .map((t) => `${t.date},${t.type},${t.category},${t.amount},"${(t.note || "").replace(/"/g, '""')}"`)
+      .map((t) => [t.date, t.type, esc(nameById[t.category] || "Noma'lum"), t.amount, esc(t.note)].join(","))
       .join("\n");
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", "attachment; filename=tranzaksiyalar.csv");
