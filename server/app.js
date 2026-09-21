@@ -4,6 +4,8 @@ import cors from "cors";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { db } from "./db.js";
+import { paymeHandler } from "./payme.js";
+import { paymentConfig, paymeCheckoutUrl } from "./payments.js";
 
 export const app = express();
 
@@ -107,8 +109,109 @@ app.delete("/api/auth/account", requireAuth, async (req, res, next) => {
   }
 });
 
+// Payment provider callback: authenticated by the provider's own Basic credentials, not a user JWT.
+app.post("/api/payme", paymeHandler);
+
 // Everything below requires a logged-in user.
 app.use("/api", requireAuth);
+
+// ---- Payments & orders ----
+app.get("/api/payments/config", (req, res) => {
+  const { payme, demo, rate } = paymentConfig();
+  res.json({ providers: [...(payme ? ["payme"] : []), ...(demo ? ["demo"] : [])], rate });
+});
+
+const PHONE_RE = /^\+?[0-9\s()-]{9,18}$/;
+
+app.post("/api/orders", async (req, res, next) => {
+  try {
+    const { items, fullName, phone, address } = req.body;
+    if (!Array.isArray(items) || items.length === 0 || items.length > 50) {
+      return res.status(400).json({ error: "Savat bo'sh yoki juda katta" });
+    }
+    const clean = [];
+    for (const it of items) {
+      const quantity = Number(it.quantity);
+      const unitPriceUsd = Number(it.unitPriceUsd);
+      if (!it.title || !Number.isInteger(quantity) || quantity < 1 || quantity > 100 || !(unitPriceUsd > 0)) {
+        return res.status(400).json({ error: "Savatdagi tovar ma'lumoti noto'g'ri" });
+      }
+      clean.push({
+        productId: it.productId ?? null,
+        title: String(it.title).slice(0, 300),
+        image: it.image ? String(it.image).slice(0, 500) : null,
+        category: it.category ? String(it.category).slice(0, 100) : null,
+        quantity,
+        unitPriceUsd,
+      });
+    }
+    if (!fullName || String(fullName).trim().length < 2) return res.status(400).json({ error: "Ism-familiyani kiriting" });
+    if (!PHONE_RE.test(String(phone || ""))) return res.status(400).json({ error: "Telefon raqami noto'g'ri" });
+    if (!address || String(address).trim().length < 5) return res.status(400).json({ error: "Yetkazib berish manzilini kiriting" });
+
+    const order = await db.createOrder(req.userId, {
+      items: clean,
+      fullName: String(fullName).trim(),
+      phone: String(phone).trim(),
+      address: String(address).trim(),
+      rate: paymentConfig().rate,
+    });
+    res.status(201).json(order);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/orders", async (req, res, next) => {
+  try {
+    res.json(await db.listOrders(req.userId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/orders/:id", async (req, res, next) => {
+  try {
+    const order = await db.getOrder(req.params.id, req.userId);
+    if (!order) return res.status(404).json({ error: "Buyurtma topilmadi" });
+    res.json(order);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/orders/:id/pay", async (req, res, next) => {
+  try {
+    const order = await db.getOrder(req.params.id, req.userId);
+    if (!order) return res.status(404).json({ error: "Buyurtma topilmadi" });
+    if (order.status !== "pending") return res.status(409).json({ error: "Buyurtma allaqachon to'langan yoki bekor qilingan" });
+    const { payme, demo } = paymentConfig();
+    const provider = req.body.provider;
+
+    if (provider === "payme" && payme) {
+      const returnUrl = process.env.APP_URL || req.headers.origin || "";
+      const base = returnUrl ? `${returnUrl.replace(/\/$/, "")}/?order=${order.id}` : "";
+      return res.json({ payUrl: paymeCheckoutUrl(order, base) });
+    }
+    if (provider === "demo" && demo) {
+      await db.markOrderPaid(order.id, "demo", null);
+      return res.json({ status: "paid" });
+    }
+    res.status(400).json({ error: "To'lov usuli mavjud emas" });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/orders/:id/cancel", async (req, res, next) => {
+  try {
+    const ok = await db.cancelPendingOrder(req.userId, req.params.id);
+    if (!ok) return res.status(409).json({ error: "Buyurtmani bekor qilib bo'lmaydi" });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ---- Categories ----
 app.get("/api/categories", async (req, res, next) => {

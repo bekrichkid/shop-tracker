@@ -62,6 +62,13 @@ export const api = {
   login: (email, password) => request("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   me: () => request("/auth/me"),
   deleteAccount: () => request("/auth/account", { method: "DELETE" }),
+
+  paymentConfig: () => request("/payments/config"),
+  createOrder: (data) => request("/orders", { method: "POST", body: JSON.stringify(data) }),
+  listOrders: () => request("/orders"),
+  getOrder: (id) => request(`/orders/${id}`),
+  payOrder: (id, provider) => request(`/orders/${id}/pay`, { method: "POST", body: JSON.stringify({ provider }) }),
+  cancelOrder: (id) => request(`/orders/${id}/cancel`, { method: "POST", body: "{}" }),
   // CSV needs the auth header, so it is fetched and saved as a file instead of window.open.
   downloadCsv: async () => {
     const csv = await request("/export/csv");

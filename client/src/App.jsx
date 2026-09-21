@@ -11,6 +11,9 @@ import ProductGrid from "./components/ProductGrid.jsx";
 import InventoryList from "./components/InventoryList.jsx";
 import CategoryManager from "./components/CategoryManager.jsx";
 import ProfileTab from "./components/ProfileTab.jsx";
+import CartSheet from "./components/CartSheet.jsx";
+import OrdersSheet from "./components/OrdersSheet.jsx";
+import { formatUzs } from "./format.js";
 
 const emptyFilters = { type: "", category: "", q: "" };
 
@@ -102,6 +105,33 @@ function Shop({ user, theme, setTheme, onLogout }) {
   const [toast, setToast] = useState(null);
   const [showManager, setShowManager] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [showCart, setShowCart] = useState(false);
+  const [showOrders, setShowOrders] = useState(false);
+  const [providers, setProviders] = useState([]);
+  const [rate, setRate] = useState(12500);
+  const cartKey = `cart_${user.id}`;
+  const [cart, setCart] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(cartKey)) || [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(cartKey, JSON.stringify(cart));
+    } catch {
+      /* storage unavailable */
+    }
+  }, [cart, cartKey]);
+
+  useEffect(() => {
+    api.paymentConfig().then((c) => {
+      setProviders(c.providers);
+      setRate(c.rate);
+    }).catch(() => {});
+  }, []);
 
   const syncAll = useCallback(async () => {
     try {
@@ -195,7 +225,83 @@ function Shop({ user, theme, setTheme, onLogout }) {
   };
   const handleDelete = (id) => act(() => api.deleteTransaction(id));
   const handleSetGoal = (data) => act(() => api.setGoal(data));
-  const handleBuy = (data) => act(() => api.buyProduct(data), `"${data.title}" xarid qilindi`);
+  const cartQty = useMemo(() => Object.fromEntries(cart.map((i) => [i.productId, i.quantity])), [cart]);
+  const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
+  const cartTotalUzs = Math.round(cart.reduce((s, i) => s + i.unitPriceUsd * i.quantity, 0) * rate);
+
+  function addToCart(p) {
+    setCart((prev) => {
+      const found = prev.find((i) => i.productId === p.id);
+      if (found) return prev.map((i) => (i.productId === p.id ? { ...i, quantity: Math.min(99, i.quantity + 1) } : i));
+      return [...prev, { productId: p.id, title: p.title, image: p.image, category: p.category, unitPriceUsd: p.price, quantity: 1 }];
+    });
+    showToast("Savatga qo'shildi");
+  }
+  const changeQty = (id, q) =>
+    setCart((prev) => (q < 1 ? prev.filter((i) => i.productId !== id) : prev.map((i) => (i.productId === id ? { ...i, quantity: Math.min(99, q) } : i))));
+  const removeFromCart = (id) => setCart((prev) => prev.filter((i) => i.productId !== id));
+
+  function goToPayment(url, orderId) {
+    try {
+      localStorage.setItem("pending_order", orderId);
+    } catch {
+      /* storage unavailable */
+    }
+    window.location.assign(url);
+  }
+
+  async function handlePaid(res) {
+    try {
+      localStorage.setItem("contact", JSON.stringify(res.contact || {}));
+    } catch {
+      /* storage unavailable */
+    }
+    if (res.redirect) return goToPayment(res.redirect, res.orderId);
+    setCart([]);
+    setShowCart(false);
+    await syncAll();
+    setTab("inventory");
+    showToast("To'lov qabul qilindi. Tovar omboringizga qo'shildi");
+  }
+
+  // Returning from the payment page (?order=ID): confirm the result with the server.
+  useEffect(() => {
+    const orderId = new URLSearchParams(window.location.search).get("order");
+    if (!orderId) return;
+    let cancelled = false;
+    const finish = () => {
+      if (!cancelled) window.history.replaceState({}, "", window.location.pathname);
+    };
+    (async () => {
+      for (let i = 0; i < 6 && !cancelled; i++) {
+        try {
+          const order = await api.getOrder(orderId);
+          if (order.status === "paid") {
+            setCart([]);
+            await syncAll();
+            setTab("inventory");
+            showToast("To'lov qabul qilindi. Tovar omboringizga qo'shildi");
+            return finish();
+          }
+          if (order.status === "cancelled") {
+            showToast("To'lov bekor qilingan");
+            return finish();
+          }
+        } catch {
+          return finish();
+        }
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+      if (!cancelled) {
+        showToast("To'lov tekshirilmoqda. Holatni Profil → Buyurtmalarim bo'limida ko'ring");
+        finish();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const handleSell = (id, price) =>
     act(() => api.sellItem(id, price), (r) => `Sotildi. ${r.profit >= 0 ? "Foyda" : "Zarar"}: ${Math.abs(r.profit).toFixed(2)} $`);
   const handleDeleteInventory = (id) => act(() => api.deleteInventory(id));
@@ -256,7 +362,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
           </div>
         )}
 
-        {tab === "shop" && <ProductGrid onBuy={handleBuy} />}
+        {tab === "shop" && <ProductGrid onAddToCart={addToCart} cartQty={cartQty} />}
 
         {tab === "inventory" && (
           <div className="stack">
@@ -274,6 +380,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
             theme={theme}
             onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
             onOpenCategories={() => setShowManager(true)}
+            onOpenOrders={() => setShowOrders(true)}
             onExport={handleExport}
             onLogout={onLogout}
             onDeleteAccount={handleDeleteAccount}
@@ -304,6 +411,37 @@ function Shop({ user, theme, setTheme, onLogout }) {
           onAddCategory={handleAddCategory}
           onClose={() => setShowManager(false)}
         />
+      )}
+
+      {cartCount > 0 && !showCart && (
+        <button className="cart-bar" onClick={() => setShowCart(true)}>
+          <span className="cart-count">{cartCount}</span>
+          <span>Savatni ko'rish</span>
+          <b>{formatUzs(cartTotalUzs)}</b>
+        </button>
+      )}
+
+      {showCart && (
+        <CartSheet
+          cart={cart}
+          providers={providers}
+          rate={rate}
+          savedContact={(() => {
+            try {
+              return JSON.parse(localStorage.getItem("contact"));
+            } catch {
+              return null;
+            }
+          })()}
+          onChangeQty={changeQty}
+          onRemove={removeFromCart}
+          onClose={() => setShowCart(false)}
+          onPaid={handlePaid}
+        />
+      )}
+
+      {showOrders && (
+        <OrdersSheet providers={providers} onClose={() => setShowOrders(false)} onRedirect={goToPayment} onChanged={syncAll} />
       )}
 
       {toast && <div className="toast" role="status">{toast}</div>}

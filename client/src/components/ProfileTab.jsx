@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-export default function ProfileTab({ user, theme, onToggleTheme, onOpenCategories, onExport, onLogout, onDeleteAccount }) {
+export default function ProfileTab({ user, theme, onToggleTheme, onOpenCategories, onOpenOrders, onExport, onLogout, onDeleteAccount }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -24,6 +24,10 @@ export default function ProfileTab({ user, theme, onToggleTheme, onOpenCategorie
       </div>
 
       <div className="menu-list">
+        <button className="menu-item" onClick={onOpenOrders}>
+          <span>Buyurtmalarim</span>
+          <span className="chev">›</span>
+        </button>
         <button className="menu-item" onClick={onOpenCategories}>
           <span>Kategoriyalar va oylik limitlar</span>
           <span className="chev">›</span>

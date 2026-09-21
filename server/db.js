@@ -77,6 +77,45 @@ function ensureSchema() {
           name TEXT,
           target_amount NUMERIC
         );
+        ALTER TABLE inventory ADD COLUMN IF NOT EXISTS order_id TEXT;
+        CREATE TABLE IF NOT EXISTS orders (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','cancelled')),
+          total_usd NUMERIC NOT NULL,
+          total_uzs BIGINT NOT NULL,
+          rate NUMERIC NOT NULL,
+          full_name TEXT,
+          phone TEXT,
+          address TEXT,
+          provider TEXT,
+          provider_ref TEXT,
+          created_at BIGINT NOT NULL,
+          paid_at BIGINT
+        );
+        CREATE TABLE IF NOT EXISTS order_items (
+          id TEXT PRIMARY KEY,
+          order_id TEXT NOT NULL,
+          product_id INT,
+          title TEXT NOT NULL,
+          image TEXT,
+          category TEXT,
+          quantity INT NOT NULL,
+          unit_price_usd NUMERIC NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS payment_transactions (
+          id TEXT PRIMARY KEY,
+          order_id TEXT NOT NULL,
+          amount BIGINT NOT NULL,
+          state INT NOT NULL,
+          reason INT,
+          create_time BIGINT NOT NULL,
+          perform_time BIGINT NOT NULL DEFAULT 0,
+          cancel_time BIGINT NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
+        CREATE INDEX IF NOT EXISTS idx_items_order ON order_items(order_id);
+        CREATE INDEX IF NOT EXISTS idx_pay_order ON payment_transactions(order_id);
         CREATE INDEX IF NOT EXISTS idx_tx_user ON transactions(user_id);
         CREATE INDEX IF NOT EXISTS idx_inv_user ON inventory(user_id);
         CREATE INDEX IF NOT EXISTS idx_cat_user ON categories(user_id);
@@ -116,6 +155,41 @@ function mapInventory(r) {
     status: r.status,
     soldPrice: r.sold_price !== null ? Number(r.sold_price) : null,
     soldAt: r.sold_at ? r.sold_at.toISOString() : null,
+  };
+}
+
+function mapOrder(r, items) {
+  return {
+    id: r.id,
+    status: r.status,
+    totalUsd: Number(r.total_usd),
+    totalUzs: Number(r.total_uzs),
+    fullName: r.full_name,
+    phone: r.phone,
+    address: r.address,
+    provider: r.provider,
+    createdAt: Number(r.created_at),
+    paidAt: r.paid_at ? Number(r.paid_at) : null,
+    items: (items || []).map((i) => ({
+      productId: i.product_id,
+      title: i.title,
+      image: i.image,
+      quantity: i.quantity,
+      unitPriceUsd: Number(i.unit_price_usd),
+    })),
+  };
+}
+
+function mapPayment(r) {
+  return {
+    id: r.id,
+    orderId: r.order_id,
+    amount: Number(r.amount),
+    state: r.state,
+    reason: r.reason,
+    createTime: Number(r.create_time),
+    performTime: Number(r.perform_time),
+    cancelTime: Number(r.cancel_time),
   };
 }
 
@@ -180,6 +254,8 @@ export const db = {
     await pool.query("DELETE FROM inventory WHERE user_id = $1", [userId]);
     await pool.query("DELETE FROM categories WHERE user_id = $1", [userId]);
     await pool.query("DELETE FROM goals WHERE user_id = $1", [userId]);
+    await pool.query("DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE user_id = $1)", [userId]);
+    await pool.query("DELETE FROM orders WHERE user_id = $1", [userId]);
     await pool.query("DELETE FROM users WHERE id = $1", [userId]);
   },
 
@@ -305,5 +381,168 @@ export const db = {
     await ensureSchema();
     const { rowCount } = await pool.query("DELETE FROM inventory WHERE id = $1 AND user_id = $2", [id, userId]);
     return rowCount > 0;
+  },
+
+  // ---- Orders & payments ----
+  async createOrder(userId, { items, fullName, phone, address, rate }) {
+    await ensureSchema();
+    const totalUsd = items.reduce((s, i) => s + i.unitPriceUsd * i.quantity, 0);
+    const totalUzs = Math.round(totalUsd * rate);
+    const id = nanoid(10);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO orders (id, user_id, status, total_usd, total_uzs, rate, full_name, phone, address, created_at)
+         VALUES ($1,$2,'pending',$3,$4,$5,$6,$7,$8,$9)`,
+        [id, userId, totalUsd, totalUzs, rate, fullName, phone, address, Date.now()]
+      );
+      for (const it of items) {
+        await client.query(
+          `INSERT INTO order_items (id, order_id, product_id, title, image, category, quantity, unit_price_usd)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [nanoid(10), id, it.productId || null, it.title, it.image || null, it.category || null, it.quantity, it.unitPriceUsd]
+        );
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+    return db.getOrder(id);
+  },
+  // userId = null skips the ownership check (used by the payment provider callback).
+  async getOrder(id, userId = null) {
+    await ensureSchema();
+    const { rows } = userId
+      ? await pool.query("SELECT * FROM orders WHERE id = $1 AND user_id = $2", [id, userId])
+      : await pool.query("SELECT * FROM orders WHERE id = $1", [id]);
+    if (!rows[0]) return null;
+    const { rows: items } = await pool.query("SELECT * FROM order_items WHERE order_id = $1", [id]);
+    return mapOrder(rows[0], items);
+  },
+  async listOrders(userId) {
+    await ensureSchema();
+    const { rows } = await pool.query("SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC", [userId]);
+    if (rows.length === 0) return [];
+    const { rows: items } = await pool.query("SELECT * FROM order_items WHERE order_id = ANY($1)", [rows.map((r) => r.id)]);
+    return rows.map((r) => mapOrder(r, items.filter((i) => i.order_id === r.id)));
+  },
+  async cancelPendingOrder(userId, id) {
+    await ensureSchema();
+    const { rowCount } = await pool.query(
+      `UPDATE orders SET status = 'cancelled' WHERE id = $1 AND user_id = $2 AND status = 'pending'
+       AND NOT EXISTS (SELECT 1 FROM payment_transactions p WHERE p.order_id = $1 AND p.state IN (1, 2))`,
+      [id, userId]
+    );
+    return rowCount > 0;
+  },
+  // Atomically flips pending -> paid and books the purchase (inventory + expense per item).
+  // Returns false if the order was not pending (already paid/cancelled), so it is safe to call twice.
+  async markOrderPaid(orderId, provider, ref) {
+    await ensureSchema();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query(
+        "UPDATE orders SET status = 'paid', provider = $2, provider_ref = $3, paid_at = $4 WHERE id = $1 AND status = 'pending' RETURNING *",
+        [orderId, provider, ref || null, Date.now()]
+      );
+      if (!rows[0]) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      const order = rows[0];
+      const { rows: items } = await client.query("SELECT * FROM order_items WHERE order_id = $1", [orderId]);
+      const catQ = await client.query(
+        "SELECT id FROM categories WHERE user_id = $1 AND type = 'expense' ORDER BY (name = 'Tovar xaridi') DESC LIMIT 1",
+        [order.user_id]
+      );
+      const categoryId = catQ.rows[0]?.id || "";
+      const when = new Date().toISOString();
+      for (const it of items) {
+        const invId = nanoid(10);
+        await client.query(
+          `INSERT INTO inventory (id, product_id, title, image, category, quantity, purchase_price, purchased_at, status, user_id, order_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'holding',$9,$10)`,
+          [invId, it.product_id, it.title, it.image, it.category, it.quantity, it.unit_price_usd, when, order.user_id, orderId]
+        );
+        await client.query(
+          `INSERT INTO transactions (id, type, amount, category, note, date, created_at, inventory_id, user_id)
+           VALUES ($1,'expense',$2,$3,$4,$5,$6,$7,$8)`,
+          [nanoid(10), Number(it.unit_price_usd) * it.quantity, categoryId, `Xarid: ${it.title}`, when, Date.now(), invId, order.user_id]
+        );
+      }
+      await client.query("COMMIT");
+      return true;
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+  // Refund of a paid order: only possible while none of its goods were sold.
+  async refundPaidOrder(orderId) {
+    await ensureSchema();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: inv } = await client.query("SELECT id, status FROM inventory WHERE order_id = $1", [orderId]);
+      if (inv.some((i) => i.status !== "holding")) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      const ids = inv.map((i) => i.id);
+      await client.query("DELETE FROM transactions WHERE inventory_id = ANY($1)", [ids]);
+      await client.query("DELETE FROM inventory WHERE order_id = $1", [orderId]);
+      await client.query("UPDATE orders SET status = 'cancelled' WHERE id = $1", [orderId]);
+      await client.query("COMMIT");
+      return true;
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+
+  async getPayment(id) {
+    await ensureSchema();
+    const { rows } = await pool.query("SELECT * FROM payment_transactions WHERE id = $1", [id]);
+    return rows[0] ? mapPayment(rows[0]) : null;
+  },
+  async getActivePaymentForOrder(orderId) {
+    await ensureSchema();
+    const { rows } = await pool.query("SELECT * FROM payment_transactions WHERE order_id = $1 AND state IN (1, 2)", [orderId]);
+    return rows[0] ? mapPayment(rows[0]) : null;
+  },
+  async createPayment({ id, orderId, amount, time }) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      "INSERT INTO payment_transactions (id, order_id, amount, state, create_time) VALUES ($1,$2,$3,1,$4) RETURNING *",
+      [id, orderId, amount, time]
+    );
+    return mapPayment(rows[0]);
+  },
+  async updatePayment(id, { state, reason, performTime, cancelTime }) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `UPDATE payment_transactions SET state = $2, reason = COALESCE($3, reason),
+         perform_time = COALESCE($4, perform_time), cancel_time = COALESCE($5, cancel_time)
+       WHERE id = $1 RETURNING *`,
+      [id, state, reason ?? null, performTime ?? null, cancelTime ?? null]
+    );
+    return rows[0] ? mapPayment(rows[0]) : null;
+  },
+  async listPayments(from, to) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      "SELECT * FROM payment_transactions WHERE create_time BETWEEN $1 AND $2 ORDER BY create_time ASC",
+      [from, to]
+    );
+    return rows.map(mapPayment);
   },
 };

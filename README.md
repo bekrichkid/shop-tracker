@@ -11,7 +11,9 @@ Real tovarlar katalogidan (FakeStoreAPI) xarid qilish, sotish va shu bilan bog'l
 
 ## Imkoniyatlar
 
-- **Do'kon**: real tovarlar katalogini ko'rish, kategoriya bo'yicha filtrlash, "Sotib olish" — bu avtomatik **xarajat** sifatida yoziladi va tovar **ombor**ga qo'shiladi
+- **Hisoblar**: email + parol, har bir foydalanuvchining ma'lumotlari alohida; ilova ichida hisobni o'chirish
+- **Do'kon**: tovarlarni qidirish/saralash/filtrlash, **savat** va buyurtma. To'lov (Payme) tasdiqlangach tovar **omborga** tushadi va **xarajat** sifatida yoziladi
+- **Buyurtmalarim**: holatlar (kutilmoqda / to'langan / bekor), qayta to'lash, bekor qilish
 - **Omborim**: hozir qo'lingizdagi (sotilmagan) tovarlar ro'yxati, har birini "Sotish" — bu avtomatik **daromad** sifatida yoziladi va foyda/zarar hisoblanadi
 - To'liq daromad/xarajat kuzatuvi: balans, davr bo'yicha kartalar (bugun/7 kun/shu oy/barchasi), qo'lda yozuv qo'shish
 - Ombordagi tovarlar umumiy qiymati
@@ -19,6 +21,13 @@ Real tovarlar katalogidan (FakeStoreAPI) xarid qilish, sotish va shu bilan bog'l
 - Kategoriya bo'yicha doira diagramma, oxirgi 14 kunlik grafik
 - Filtr va CSV eksport
 - Kunduzgi/tungi rejim
+
+## To'lov (Payme)
+
+Callback manzil (Payme kabinetida ro'yxatdan o'tkaziladi): `https://<sayt>/api/payme`.
+Netlify muhit o'zgaruvchilari: `PAYME_MERCHANT_ID`, `PAYME_KEY`, `APP_URL`, ixtiyoriy `PAYME_TEST=on`, `USD_TO_UZS`.
+Kalitlar qo'yilmaguncha **Demo** to'lov ishlaydi (haqiqiy pul yechilmaydi); kalitlar qo'yilgach u avtomatik o'chadi.
+Merchant API to'liq qo'llab-quvvatlanadi: CheckPerform/Create/Perform/Cancel/CheckTransaction/GetStatement.
 
 ## Mahalliy ishga tushirish
 

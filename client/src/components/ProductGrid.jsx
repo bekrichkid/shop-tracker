@@ -9,17 +9,13 @@ const SORTS = [
   { key: "rating", label: "Reyting bo'yicha" },
 ];
 
-export default function ProductGrid({ onBuy }) {
+export default function ProductGrid({ onAddToCart, cartQty }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const [sort, setSort] = useState("default");
-  const [buying, setBuying] = useState(null);
-  const [quantity, setQuantity] = useState(1);
-  const [price, setPrice] = useState("");
-  const [busy, setBusy] = useState(false);
 
   function load() {
     setLoading(true);
@@ -43,30 +39,6 @@ export default function ProductGrid({ onBuy }) {
     else if (sort === "rating") list = [...list].sort((a, b) => (b.rating?.rate || 0) - (a.rating?.rate || 0));
     return list;
   }, [products, query, category, sort]);
-
-  function startBuy(product) {
-    setBuying(product);
-    setQuantity(1);
-    setPrice(String(product.price));
-  }
-
-  async function confirmBuy() {
-    if (busy || !price || Number(price) <= 0) return;
-    setBusy(true);
-    try {
-      await onBuy({
-        productId: buying.id,
-        title: buying.title,
-        image: buying.image,
-        category: buying.category,
-        quantity: Number(quantity) || 1,
-        purchasePrice: Number(price),
-      });
-      setBuying(null);
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <section>
@@ -117,45 +89,14 @@ export default function ProductGrid({ onBuy }) {
                 <span className="product-price">{formatSum(p.price)}</span>
                 {p.rating && <span className="product-rating">★ {p.rating.rate}</span>}
               </div>
-              <button className="btn btn-primary btn-block" onClick={() => startBuy(p)}>Sotib olish</button>
+              <button className="btn btn-primary btn-block" onClick={() => onAddToCart(p)}>
+                {cartQty[p.id] ? `Savatda: ${cartQty[p.id]} · yana qo'shish` : "Savatga qo'shish"}
+              </button>
             </article>
           ))}
         </div>
       )}
 
-      {buying && (
-        <div className="sheet-backdrop" onClick={() => setBuying(null)}>
-          <div className="sheet" role="dialog" aria-modal="true" aria-label="Sotib olish" onClick={(e) => e.stopPropagation()}>
-            <div className="sheet-grab" />
-            <div className="sheet-head">
-              <h3>Sotib olish</h3>
-              <button className="icon-btn" onClick={() => setBuying(null)} aria-label="Yopish">✕</button>
-            </div>
-            <div className="buy-preview">
-              <img src={buying.image} alt="" />
-              <div className="buy-title">{buying.title}</div>
-            </div>
-            <div className="form-row">
-              <label className="field">
-                <span>Miqdori</span>
-                <input type="number" inputMode="numeric" min="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
-              </label>
-              <label className="field">
-                <span>Dona narxi ($)</span>
-                <input type="number" inputMode="decimal" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} />
-              </label>
-            </div>
-            <div className="total-row">
-              <span>Jami</span>
-              <b>{formatSum(Number(price || 0) * Number(quantity || 0))}</b>
-            </div>
-            <button className="btn btn-primary btn-block" onClick={confirmBuy} disabled={busy}>
-              {busy ? "Iltimos kuting..." : "Tasdiqlash"}
-            </button>
-            <p className="muted small center">Xarajat sifatida yoziladi va tovar omboringizga qo'shiladi.</p>
-          </div>
-        </div>
-      )}
     </section>
   );
 }
