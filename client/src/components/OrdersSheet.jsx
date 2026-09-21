@@ -2,9 +2,30 @@ import { useEffect, useState } from "react";
 import { api } from "../api.js";
 import { formatSum, formatUzs, formatDate } from "../format.js";
 
+const STEPS = [
+  { key: "new", label: "To'landi" },
+  { key: "processing", label: "Tayyorlanmoqda" },
+  { key: "shipped", label: "Yo'lda" },
+  { key: "delivered", label: "Yetkazildi" },
+];
+
+function Timeline({ fulfillment }) {
+  const at = Math.max(0, STEPS.findIndex((x) => x.key === fulfillment));
+  return (
+    <ol className="timeline" aria-label="Buyurtma holati">
+      {STEPS.map((st, i) => (
+        <li key={st.key} className={i < at ? "done" : i === at ? "now" : ""}>
+          <span className="tl-dot" />
+          <span className="tl-label">{st.label}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 const STATUS = { pending: ["To'lov kutilmoqda", "st-pending"], paid: ["To'langan", "st-paid"], cancelled: ["Bekor qilingan", "st-cancelled"] };
 
-export default function OrdersSheet({ providers, onClose, onRedirect, onChanged }) {
+export default function OrdersSheet({ providers, onClose, onRedirect, onChanged, onReorder }) {
   const [orders, setOrders] = useState(null);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
@@ -72,6 +93,13 @@ export default function OrdersSheet({ providers, onClose, onRedirect, onChanged 
                 <b>{formatUzs(o.totalUzs)}</b>
                 <span className="muted small">{formatSum(o.totalUsd)}</span>
               </div>
+              {o.status === "paid" && <Timeline fulfillment={o.fulfillment} />}
+              {o.status === "paid" && o.adminNote && <div className="note-box">{o.adminNote}</div>}
+              {o.status === "paid" && (
+                <div className="order-actions">
+                  <button className="btn btn-small btn-ghost" onClick={() => { onReorder(o.items); onClose(); }}>Qayta buyurtma</button>
+                </div>
+              )}
               {o.status === "pending" && (
                 <div className="order-actions">
                   <button className="btn btn-small btn-primary" disabled={busyId === o.id} onClick={() => pay(o)}>To'lash</button>

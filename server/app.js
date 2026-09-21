@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { db } from "./db.js";
 import { paymeHandler } from "./payme.js";
+import { notifyOrderPaid } from "./notify.js";
 import { paymentConfig, paymeCheckoutUrl } from "./payments.js";
 
 export const app = express();
@@ -116,6 +117,16 @@ app.delete("/api/auth/account", requireAuth, async (req, res, next) => {
 // Payment provider callback: authenticated by the provider's own Basic credentials, not a user JWT.
 app.post("/api/payme", paymeHandler);
 
+// Public shop contact details (set in env) for the support screen.
+app.get("/api/store", (req, res) => {
+  res.json({
+    name: process.env.STORE_NAME || "Tovar Do'koni",
+    phone: process.env.SUPPORT_PHONE || "",
+    telegram: process.env.SUPPORT_TELEGRAM || "",
+    hours: process.env.SUPPORT_HOURS || "",
+  });
+});
+
 // Public catalog (prices are authoritative here; orders never trust client-sent prices).
 app.get("/api/products", async (req, res, next) => {
   try {
@@ -155,6 +166,11 @@ app.post("/api/orders", async (req, res, next) => {
     const found = await db.getProducts([...wanted.keys()]);
     if (found.length !== wanted.size) {
       return res.status(400).json({ error: "Savatdagi ba'zi tovarlar endi sotuvda yo'q. Savatni yangilang" });
+    }
+    for (const p of found) {
+      if (p.stock !== null && p.stock !== undefined && wanted.get(p.id) > p.stock) {
+        return res.status(409).json({ error: p.stock > 0 ? `"${p.title}" dan omborda faqat ${p.stock} dona qoldi` : `"${p.title}" tugagan` });
+      }
     }
     const clean = found.map((p) => ({
       productId: p.id,
@@ -212,6 +228,14 @@ function parseProduct(body, { partial }) {
   if (body.description !== undefined) out.description = String(body.description).slice(0, 2000);
   if (body.image !== undefined) out.image = String(body.image).slice(0, 500);
   if (body.active !== undefined) out.active = Boolean(body.active);
+  if (body.stock !== undefined) {
+    if (body.stock === null || body.stock === "") out.stock = null;
+    else {
+      const st = Number(body.stock);
+      if (!Number.isInteger(st) || st < 0 || st > 1e6) return { error: "Zaxira noto'g'ri" };
+      out.stock = st;
+    }
+  }
   return { value: out };
 }
 
@@ -240,6 +264,36 @@ app.put("/api/admin/products/:id", requireAdmin, async (req, res, next) => {
     const updated = await db.updateProduct(Number(req.params.id), value);
     if (!updated) return res.status(404).json({ error: "Tovar topilmadi" });
     res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+const FULFILLMENT = ["new", "processing", "shipped", "delivered"];
+
+app.get("/api/admin/orders", requireAdmin, async (req, res, next) => {
+  try {
+    res.json(await db.adminListOrders({ view: String(req.query.view || "") }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.put("/api/admin/orders/:id", requireAdmin, async (req, res, next) => {
+  try {
+    const { fulfillment, note } = req.body;
+    if (fulfillment !== undefined && !FULFILLMENT.includes(fulfillment)) return res.status(400).json({ error: "Holat noto'g'ri" });
+    const ok = await db.adminSetFulfillment(req.params.id, fulfillment, note === undefined ? undefined : String(note).slice(0, 500));
+    if (!ok) return res.status(404).json({ error: "To'langan buyurtma topilmadi" });
+    res.json(await db.getOrder(req.params.id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/admin/stats", requireAdmin, async (req, res, next) => {
+  try {
+    res.json(await db.adminStats());
   } catch (err) {
     next(err);
   }
@@ -277,7 +331,7 @@ app.post("/api/orders/:id/pay", async (req, res, next) => {
       return res.json({ payUrl: paymeCheckoutUrl(order, base) });
     }
     if (provider === "demo" && demo) {
-      await db.markOrderPaid(order.id, "demo", null);
+      if (await db.markOrderPaid(order.id, "demo", null)) await notifyOrderPaid(order.id);
       return res.json({ status: "paid" });
     }
     res.status(400).json({ error: "To'lov usuli mavjud emas" });

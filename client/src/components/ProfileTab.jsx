@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-export default function ProfileTab({ user, theme, onToggleTheme, onOpenCategories, onOpenOrders, onExport, onLogout, onDeleteAccount }) {
+export default function ProfileTab({ store, onOpenAdmin, user, theme, onToggleTheme, onOpenCategories, onOpenOrders, onExport, onLogout, onDeleteAccount }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -23,6 +23,16 @@ export default function ProfileTab({ user, theme, onToggleTheme, onOpenCategorie
         </div>
       </div>
 
+      {user?.isAdmin && (
+        <button className="admin-entry" onClick={onOpenAdmin}>
+          <span>
+            <b>Boshqaruv paneli</b>
+            <span className="muted small">Buyurtmalar, tovarlar va statistika</span>
+          </span>
+          <span className="chev">›</span>
+        </button>
+      )}
+
       <div className="menu-list">
         <button className="menu-item" onClick={onOpenOrders}>
           <span>Buyurtmalarim</span>
@@ -40,6 +50,18 @@ export default function ProfileTab({ user, theme, onToggleTheme, onOpenCategorie
           <span>Ko'rinish: {theme === "light" ? "Kunduzgi" : "Tungi"}</span>
           <span className="chev">›</span>
         </button>
+        {store?.phone && (
+          <a className="menu-item" href={`tel:${store.phone.replace(/\s/g, "")}`}>
+            <span>Qo'ng'iroq: {store.phone}{store.hours ? ` · ${store.hours}` : ""}</span>
+            <span className="chev">›</span>
+          </a>
+        )}
+        {store?.telegram && (
+          <a className="menu-item" href={store.telegram.startsWith("http") ? store.telegram : `https://t.me/${store.telegram.replace(/^@/, "")}`} target="_blank" rel="noreferrer">
+            <span>Telegram orqali yozish</span>
+            <span className="chev">›</span>
+          </a>
+        )}
         <a className="menu-item" href="/privacy.html" target="_blank" rel="noreferrer">
           <span>Maxfiylik siyosati</span>
           <span className="chev">›</span>

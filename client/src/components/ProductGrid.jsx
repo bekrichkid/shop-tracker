@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api.js";
 import { formatSum } from "../format.js";
 
+const isOut = (p) => p.stock !== null && p.stock !== undefined && p.stock <= 0;
+const isLow = (p) => !isOut(p) && p.stock !== null && p.stock !== undefined && p.stock <= 5;
+
 const SORTS = [
   { key: "default", label: "Odatiy" },
   { key: "price-asc", label: "Arzonroq" },
@@ -9,7 +12,7 @@ const SORTS = [
   { key: "rating", label: "Reyting bo'yicha" },
 ];
 
-export default function ProductGrid({ onAddToCart, cartQty, onCatalog }) {
+export default function ProductGrid({ onAddToCart, cartQty, onCatalog, onOpen }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -84,16 +87,20 @@ export default function ProductGrid({ onAddToCart, cartQty, onCatalog }) {
         <div className="product-grid">
           {visible.map((p, idx) => (
             <article key={p.id} className="product-card" style={{ "--i": Math.min(idx, 10) }}>
-              <div className="product-image-wrap">
-                <img src={p.image} alt={p.title} loading="lazy" width="200" height="200" />
+              <div className="product-tap" role="button" tabIndex={0} onClick={() => onOpen(p)} onKeyDown={(e) => e.key === "Enter" && onOpen(p)}>
+                <div className="product-image-wrap">
+                  <img src={p.image} alt={p.title} loading="lazy" width="200" height="200" />
+                  {isOut(p) && <span className="ribbon">Tugagan</span>}
+                  {isLow(p) && <span className="ribbon ribbon-warn">Oxirgi {p.stock} dona</span>}
+                </div>
+                <h3 className="product-title" title={p.title}>{p.title}</h3>
+                <div className="product-meta">
+                  <span className="product-price">{formatSum(p.price)}</span>
+                  {p.rating && <span className="product-rating">★ {p.rating.rate}</span>}
+                </div>
               </div>
-              <h3 className="product-title" title={p.title}>{p.title}</h3>
-              <div className="product-meta">
-                <span className="product-price">{formatSum(p.price)}</span>
-                {p.rating && <span className="product-rating">★ {p.rating.rate}</span>}
-              </div>
-              <button key={cartQty[p.id] || 0} className={"btn btn-primary btn-block" + (cartQty[p.id] ? " btn-added" : "")} onClick={() => onAddToCart(p)}>
-                {cartQty[p.id] ? `Savatda: ${cartQty[p.id]} · yana qo'shish` : "Savatga qo'shish"}
+              <button key={cartQty[p.id] || 0} disabled={isOut(p)} className={"btn btn-primary btn-block" + (cartQty[p.id] ? " btn-added" : "")} onClick={() => onAddToCart(p)}>
+                {isOut(p) ? "Tugagan" : cartQty[p.id] ? `Savatda: ${cartQty[p.id]} · yana qo'shish` : "Savatga qo'shish"}
               </button>
             </article>
           ))}

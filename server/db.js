@@ -127,6 +127,10 @@ function ensureSchema() {
           rating_count INT,
           active BOOLEAN NOT NULL DEFAULT TRUE
         );
+        ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INT;
+        ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment TEXT NOT NULL DEFAULT 'new';
+        ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment_at BIGINT;
+        ALTER TABLE orders ADD COLUMN IF NOT EXISTS admin_note TEXT;
         CREATE INDEX IF NOT EXISTS idx_pay_order ON payment_transactions(order_id);
         CREATE INDEX IF NOT EXISTS idx_tx_user ON transactions(user_id);
         CREATE INDEX IF NOT EXISTS idx_inv_user ON inventory(user_id);
@@ -158,6 +162,7 @@ function mapProduct(r) {
     price: Number(r.price_usd),
     image: r.image,
     rating: r.rating_rate == null ? null : { rate: Number(r.rating_rate), count: r.rating_count },
+    stock: r.stock,
     active: r.active,
   };
 }
@@ -207,6 +212,10 @@ function mapOrder(r, items) {
     provider: r.provider,
     createdAt: Number(r.created_at),
     paidAt: r.paid_at ? Number(r.paid_at) : null,
+    fulfillment: r.fulfillment || "new",
+    fulfillmentAt: r.fulfillment_at ? Number(r.fulfillment_at) : null,
+    adminNote: r.admin_note || "",
+    customerEmail: r.customer_email,
     items: (items || []).map((i) => ({
       productId: i.product_id,
       title: i.title,
@@ -437,9 +446,9 @@ export const db = {
   async createProduct(p) {
     await ensureSchema();
     const { rows } = await pool.query(
-      `INSERT INTO products (title, description, category, price_usd, image, active)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [p.title, p.description || null, p.category, p.price, p.image || null, p.active !== false]
+      `INSERT INTO products (title, description, category, price_usd, image, active, stock)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [p.title, p.description || null, p.category, p.price, p.image || null, p.active !== false, p.stock ?? null]
     );
     return mapProduct(rows[0]);
   },
@@ -449,9 +458,11 @@ export const db = {
       `UPDATE products SET
          title = COALESCE($2, title), description = COALESCE($3, description),
          category = COALESCE($4, category), price_usd = COALESCE($5, price_usd),
-         image = COALESCE($6, image), active = COALESCE($7, active)
+         image = COALESCE($6, image), active = COALESCE($7, active),
+         stock = CASE WHEN $8 THEN $9::int ELSE stock END
        WHERE id = $1 RETURNING *`,
-      [id, p.title ?? null, p.description ?? null, p.category ?? null, p.price ?? null, p.image ?? null, p.active ?? null]
+      [id, p.title ?? null, p.description ?? null, p.category ?? null, p.price ?? null, p.image ?? null, p.active ?? null,
+       p.stock !== undefined, p.stock ?? null]
     );
     return rows[0] ? mapProduct(rows[0]) : null;
   },
@@ -536,6 +547,9 @@ export const db = {
       const categoryId = catQ.rows[0]?.id || "";
       const when = new Date().toISOString();
       for (const it of items) {
+        if (it.product_id != null) {
+          await client.query("UPDATE products SET stock = GREATEST(stock - $2, 0) WHERE id = $1 AND stock IS NOT NULL", [it.product_id, it.quantity]);
+        }
         const invId = nanoid(10);
         await client.query(
           `INSERT INTO inventory (id, product_id, title, image, category, quantity, purchase_price, purchased_at, status, user_id, order_id)
@@ -569,6 +583,12 @@ export const db = {
         return false;
       }
       const ids = inv.map((i) => i.id);
+      const { rows: ordItems } = await client.query("SELECT product_id, quantity FROM order_items WHERE order_id = $1", [orderId]);
+      for (const it of ordItems) {
+        if (it.product_id != null) {
+          await client.query("UPDATE products SET stock = stock + $2 WHERE id = $1 AND stock IS NOT NULL", [it.product_id, it.quantity]);
+        }
+      }
       await client.query("DELETE FROM transactions WHERE inventory_id = ANY($1)", [ids]);
       await client.query("DELETE FROM inventory WHERE order_id = $1", [orderId]);
       await client.query("UPDATE orders SET status = 'cancelled' WHERE id = $1", [orderId]);
@@ -580,6 +600,63 @@ export const db = {
     } finally {
       client.release();
     }
+  },
+
+  // ---- Company (admin) side ----
+  async adminListOrders({ view } = {}) {
+    await ensureSchema();
+    const where =
+      view === "unpaid" ? "o.status = 'pending'" :
+      view === "cancelled" ? "o.status = 'cancelled'" :
+      ["new", "processing", "shipped", "delivered"].includes(view) ? `o.status = 'paid' AND o.fulfillment = '${view}'` :
+      "TRUE";
+    const { rows } = await pool.query(
+      `SELECT o.*, u.email AS customer_email FROM orders o LEFT JOIN users u ON u.id = o.user_id
+       WHERE ${where} ORDER BY o.created_at DESC LIMIT 200`
+    );
+    if (rows.length === 0) return [];
+    const { rows: items } = await pool.query("SELECT * FROM order_items WHERE order_id = ANY($1)", [rows.map((r) => r.id)]);
+    return rows.map((r) => mapOrder(r, items.filter((i) => i.order_id === r.id)));
+  },
+  async adminSetFulfillment(id, fulfillment, note) {
+    await ensureSchema();
+    const { rowCount } = await pool.query(
+      `UPDATE orders SET fulfillment = COALESCE($2, fulfillment), fulfillment_at = $3, admin_note = COALESCE($4, admin_note)
+       WHERE id = $1 AND status = 'paid'`,
+      [id, fulfillment ?? null, Date.now(), note ?? null]
+    );
+    return rowCount > 0;
+  },
+  async adminStats() {
+    await ensureSchema();
+    const now = Date.now();
+    const day = 86400000;
+    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+    const sum = async (since) => {
+      const { rows } = await pool.query(
+        "SELECT COALESCE(SUM(total_uzs),0)::bigint AS uzs, COUNT(*)::int AS n FROM orders WHERE status = 'paid' AND paid_at >= $1",
+        [since]
+      );
+      return { uzs: Number(rows[0].uzs), orders: rows[0].n };
+    };
+    const [today, week, month, all] = await Promise.all([sum(startOfToday.getTime()), sum(now - 7 * day), sum(now - 30 * day), sum(0)]);
+    const { rows: byStatus } = await pool.query(
+      `SELECT CASE WHEN status = 'paid' THEN fulfillment ELSE status END AS k, COUNT(*)::int AS n FROM orders GROUP BY 1`
+    );
+    const { rows: top } = await pool.query(
+      `SELECT i.title, i.image, SUM(i.quantity)::int AS qty, SUM(i.quantity * i.unit_price_usd * o.rate)::bigint AS uzs
+       FROM order_items i JOIN orders o ON o.id = i.order_id WHERE o.status = 'paid'
+       GROUP BY i.title, i.image ORDER BY qty DESC LIMIT 5`
+    );
+    const { rows: cust } = await pool.query("SELECT COUNT(*)::int AS n FROM users");
+    const { rows: low } = await pool.query("SELECT id, title, stock FROM products WHERE active AND stock IS NOT NULL AND stock <= 5 ORDER BY stock LIMIT 10");
+    return {
+      today, week, month, all,
+      byStatus: Object.fromEntries(byStatus.map((r) => [r.k, r.n])),
+      top: top.map((t) => ({ title: t.title, image: t.image, qty: t.qty, uzs: Number(t.uzs) })),
+      customers: cust[0].n,
+      lowStock: low,
+    };
   },
 
   async getPayment(id) {

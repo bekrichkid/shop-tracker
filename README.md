@@ -34,6 +34,15 @@ Merchant API to'liq qo'llab-quvvatlanadi: CheckPerform/Create/Perform/Cancel/Che
 Tovarlar Postgres'dagi `products` jadvalida (birinchi ishga tushishda `server/catalog.json`'dan to'ldiriladi, rasmlar `client/public/products/`). `GET /api/products` ochiq. Buyurtmada narx va nom **faqat serverdagi katalogdan** olinadi, mijoz yuborgan narxga ishonilmaydi.
 `ADMIN_EMAILS` (Netlify env) ichidagi emaillar `GET/POST /api/admin/products`, `PUT /api/admin/products/:id` orqali tovar qo'shishi, narxini o'zgartirishi yoki `{"active":false}` bilan sotuvdan olishi mumkin.
 
+## Kompaniya tomoni (Boshqaruv paneli)
+
+`ADMIN_EMAILS` ichidagi hisob Profil → **Boshqaruv paneli**ni ko'radi:
+- **Buyurtmalar**: yangi → tayyorlanmoqda → yo'lda → yetkazildi; mijoz telefoni (bosib qo'ng'iroq), manzil, izoh (mijozga ko'rinadi)
+- **Tovarlar**: qo'shish, narx, zaxira (bo'sh = cheksiz), rasm, yashirish
+- **Statistika**: bugun/7/30 kun tushum, bajarilishi kerak buyurtmalar, eng ko'p sotilganlar, zaxira tugayotganlar
+- Yangi to'langan buyurtma haqida **Telegram** xabari (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`)
+- Mijoz Profilida: Buyurtmalarim (holat chizig'i, qayta buyurtma), qo'ng'iroq/Telegram aloqa (`SUPPORT_*`)
+
 ## Mahalliy ishga tushirish
 
 ### 1. Postgres

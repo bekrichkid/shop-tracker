@@ -69,7 +69,11 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  getStore: () => request("/store"),
   getProducts: () => request("/products"),
+  adminOrders: (view) => request(`/admin/orders${view ? `?view=${view}` : ""}`),
+  adminSetOrder: (id, data) => request(`/admin/orders/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  adminStats: () => request("/admin/stats"),
   adminProducts: () => request("/admin/products"),
   adminCreateProduct: (data) => request("/admin/products", { method: "POST", body: JSON.stringify(data) }),
   adminUpdateProduct: (id, data) => request(`/admin/products/${id}`, { method: "PUT", body: JSON.stringify(data) }),

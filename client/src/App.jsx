@@ -12,6 +12,8 @@ import InventoryList from "./components/InventoryList.jsx";
 import CategoryManager from "./components/CategoryManager.jsx";
 import ProfileTab from "./components/ProfileTab.jsx";
 import CartSheet from "./components/CartSheet.jsx";
+import ProductSheet from "./components/ProductSheet.jsx";
+import AdminPanel from "./components/AdminPanel.jsx";
 import OrdersSheet from "./components/OrdersSheet.jsx";
 import { formatUzs } from "./format.js";
 
@@ -107,6 +109,9 @@ function Shop({ user, theme, setTheme, onLogout }) {
   const [showAdd, setShowAdd] = useState(false);
   const [showCart, setShowCart] = useState(false);
   const [showOrders, setShowOrders] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [openProduct, setOpenProduct] = useState(null);
+  const [store, setStore] = useState(null);
   const [providers, setProviders] = useState([]);
   const [rate, setRate] = useState(12500);
   const cartKey = `cart_${user.id}`;
@@ -131,6 +136,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
       setProviders(c.providers);
       setRate(c.rate);
     }).catch(() => {});
+    api.getStore().then(setStore).catch(() => {});
   }, []);
 
   const syncAll = useCallback(async () => {
@@ -250,6 +256,19 @@ function Shop({ user, theme, setTheme, onLogout }) {
       return JSON.stringify(next) === JSON.stringify(prev) ? prev : next;
     });
   }, []);
+  function reorder(items) {
+    setCart((prev) => {
+      const next = [...prev];
+      for (const it of items) {
+        if (it.productId == null) continue;
+        const found = next.find((c) => c.productId === it.productId);
+        if (found) found.quantity = Math.min(99, found.quantity + it.quantity);
+        else next.push({ productId: it.productId, title: it.title, image: it.image, category: "", unitPriceUsd: it.unitPriceUsd, quantity: Math.min(99, it.quantity) });
+      }
+      return next.map((c) => ({ ...c }));
+    });
+    setShowCart(true);
+  }
   const changeQty = (id, q) =>
     setCart((prev) => (q < 1 ? prev.filter((i) => i.productId !== id) : prev.map((i) => (i.productId === id ? { ...i, quantity: Math.min(99, q) } : i))));
   const removeFromCart = (id) => setCart((prev) => prev.filter((i) => i.productId !== id));
@@ -375,7 +394,7 @@ function Shop({ user, theme, setTheme, onLogout }) {
           </div>
         )}
 
-        {tab === "shop" && <ProductGrid onAddToCart={addToCart} cartQty={cartQty} onCatalog={syncCartWithCatalog} />}
+        {tab === "shop" && <ProductGrid onAddToCart={addToCart} cartQty={cartQty} onCatalog={syncCartWithCatalog} onOpen={setOpenProduct} />}
 
         {tab === "inventory" && (
           <div className="stack">
@@ -389,6 +408,8 @@ function Shop({ user, theme, setTheme, onLogout }) {
 
         {tab === "profile" && (
           <ProfileTab
+            store={store}
+            onOpenAdmin={() => setShowAdmin(true)}
             user={user}
             theme={theme}
             onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
@@ -454,8 +475,14 @@ function Shop({ user, theme, setTheme, onLogout }) {
       )}
 
       {showOrders && (
-        <OrdersSheet providers={providers} onClose={() => setShowOrders(false)} onRedirect={goToPayment} onChanged={syncAll} />
+        <OrdersSheet providers={providers} onClose={() => setShowOrders(false)} onRedirect={goToPayment} onChanged={syncAll} onReorder={reorder} />
       )}
+
+      {openProduct && (
+        <ProductSheet product={openProduct} inCart={cartQty[openProduct.id]} rate={rate} onAdd={addToCart} onClose={() => setOpenProduct(null)} />
+      )}
+
+      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} onToast={showToast} />}
 
       {toast && <div className="toast" role="status">{toast}</div>}
     </div>

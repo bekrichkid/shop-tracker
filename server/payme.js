@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { db } from "./db.js";
+import { notifyOrderPaid } from "./notify.js";
 
 // Payme Merchant API (JSON-RPC 2.0). Payme calls this endpoint; it authenticates with
 // HTTP Basic "Paycom:<PAYME_KEY>". Amounts are in tiyin (1 so'm = 100 tiyin). Every reply is HTTP 200.
@@ -80,6 +81,7 @@ const methods = {
       throw rpcError(-31008);
     }
     if (!(await db.markOrderPaid(p.orderId, "payme", p.id))) throw rpcError(-31008);
+    await notifyOrderPaid(p.orderId);
     const done = await db.updatePayment(p.id, { state: 2, performTime: Date.now() });
     return { transaction: done.id, perform_time: done.performTime, state: 2 };
   },
